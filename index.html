@@ -3,9 +3,10 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
     <meta name="description" content="纯浏览器本地运行的 6、12、24、96、384 孔板布局、标签与批量计算工具。" />
     <title>Plate Layout Planner · 孔板布局规划工具</title>
-    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="styles.css?v=20260819-13" />
   </head>
   <body>
     <header class="topbar">
@@ -57,7 +58,6 @@
                   <button class="plate-option" data-size="96" type="button">96 孔</button>
                   <button class="plate-option" data-size="384" type="button">384 孔</button>
                 </div>
-                <p data-i18n="selectionHelp">单击逐孔选择，拖动框选，Shift 单击连续选择。</p>
               </div>
             </div>
             <div class="plate-heading-tools">
@@ -87,6 +87,7 @@
 
           <div class="plate-scroll">
             <div id="plateCanvas" class="plate-canvas" aria-label="可交互孔板布局">
+              <p class="plate-interaction-help" data-i18n="selectionHelp">单击单选，Ctrl/⌘ 单击逐个增减，拖动框选，Shift 单击连选；单击空白处取消选择。</p>
               <div id="plateGrid" class="plate-grid"></div>
               <div id="selectionBox" class="selection-box" hidden></div>
             </div>
@@ -124,16 +125,19 @@
             </form>
 
             <div id="dimensionList" class="dimension-list"></div>
+            </div>
+          </details>
 
-            <div class="panel-divider"></div>
-            <div id="selectedWellSummary" class="selected-well-summary" aria-live="polite"></div>
-            <div class="selection-editor-head">
+          <details class="card assignment-card collapsible-card" open>
+            <summary class="collapsible-summary">
               <div>
-                <h3 data-i18n="assignTitle">为所选孔赋值</h3>
+                <h2 data-i18n="assignTitle">为所选孔赋值</h2>
                 <p data-i18n="assignBody">修改输入框会自动勾选该维度，只应用已勾选项。</p>
               </div>
-              <span id="editorSelectionCount">0 孔</span>
-            </div>
+              <span class="collapsible-summary-meta"><span id="editorSelectionCount">0 孔</span><span class="collapse-toggle" aria-hidden="true"></span></span>
+            </summary>
+            <div class="collapsible-content">
+            <div id="selectedWellSummary" class="selected-well-summary" aria-live="polite"></div>
             <div id="selectionEditor" class="selection-editor"></div>
             <div class="editor-actions">
               <button id="applyParametersButton" class="primary-button" type="button" data-i18n="applySelected">应用到所选孔</button>
@@ -154,19 +158,27 @@
             <p class="panel-note">例：全部“处理 = Drug A”的孔，将“原始值”乘以“稀释倍数”，写入“校正值”。仅处理可解析的数值。</p>
 
             <div class="calc-grid">
-              <label><span>作用范围</span><select id="calcScope"><option value="selected">当前所选孔</option><option value="all">当前板全部孔</option></select></label>
-              <label><span>条件维度（可选）</span><select id="calcConditionDimension"></select></label>
-              <label class="calc-wide"><span>条件值（精确匹配）</span><input id="calcConditionValue" list="conditionValueSuggestions" type="text" placeholder="留空时匹配空值；无条件请选择“不筛选”" /><datalist id="conditionValueSuggestions"></datalist></label>
-              <label><span>源数值维度</span><select id="calcSource"></select></label>
-              <label><span>运算</span><select id="calcOperation"><option value="multiply">× 乘以</option><option value="divide">÷ 除以</option><option value="add">＋ 加上</option><option value="subtract">－ 减去</option></select></label>
-              <label><span>右侧值来源</span><select id="operandMode"><option value="constant">固定数值</option><option value="parameter">另一个数值维度</option></select></label>
-              <label id="constantOperandWrap"><span>固定数值</span><input id="constantOperand" type="number" step="any" value="1" /></label>
-              <label id="parameterOperandWrap" hidden><span>右侧数值维度</span><select id="parameterOperand"></select></label>
-              <label><span>结果维度名称</span><input id="calcOutputName" type="text" value="计算结果" maxlength="30" /></label>
-              <label><span>保留小数位</span><input id="calcPrecision" type="number" min="0" max="12" value="4" /></label>
+              <label><span>要计算哪些孔</span><select id="calcScope"><option value="selected">当前选中的孔</option><option value="all">当前板所有孔</option></select></label>
+              <label><span>只计算哪一类孔（可选）</span><select id="calcConditionDimension"></select></label>
+              <label class="calc-wide"><span>标签值必须等于</span><input id="calcConditionValue" list="conditionValueSuggestions" type="text" placeholder="例如 Drug A；不筛选时无需填写" /><datalist id="conditionValueSuggestions"></datalist></label>
+              <label><span>要计算的数值</span><select id="calcSource"></select></label>
+              <label><span>计算方式</span><select id="calcOperation"><option value="multiply">× 乘以</option><option value="divide">÷ 除以</option><option value="add">＋ 加上</option><option value="subtract">－ 减去</option></select></label>
+              <label><span>用什么数参与计算</span><select id="operandMode"><option value="constant">输入一个固定数</option><option value="parameter">使用孔内另一个参数</option></select></label>
+              <label id="constantOperandWrap"><span>输入这个数</span><input id="constantOperand" type="number" step="any" value="1" /></label>
+              <label id="parameterOperandWrap" hidden><span>选择另一个数值参数</span><select id="parameterOperand"></select></label>
+              <label><span>结果保存为</span><input id="calcOutputName" type="text" value="计算结果" maxlength="30" /></label>
+              <label><span>结果保留小数位</span><input id="calcPrecision" type="number" min="0" max="12" value="4" /></label>
             </div>
+            <div id="calculationGuide" class="calculation-guide" aria-live="polite"></div>
             <button id="runCalculationButton" class="primary-button full" type="button" data-i18n="runCalculation">运行批量计算</button>
             <div id="calculationResult" class="calculation-result" aria-live="polite"></div>
+            <section class="calculation-output-section" aria-labelledby="calculationOutputTitle">
+              <div class="calculation-output-heading">
+                <div><h3 id="calculationOutputTitle">已生成的计算结果</h3><p>以下顺序就是导出表中的结果列顺序。</p></div>
+                <span id="calculationOutputCount">0</span>
+              </div>
+              <div id="calculationOutputList" class="calculation-output-list"></div>
+            </section>
             </div>
           </details>
         </aside>
@@ -179,7 +191,7 @@
     </main>
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
-    <script src="core.js"></script>
-    <script src="app.js"></script>
+    <script src="core.js?v=20260819-7"></script>
+    <script src="app.js?v=20260819-7"></script>
   </body>
 </html>

@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="纯浏览器本地运行的 6、12、24、96、384 孔板布局、标签与批量计算工具。" />
+    <title>Plate Layout Planner · 孔板布局规划工具</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="#workspace" aria-label="返回孔板工作区">
+        <span class="brand-mark" aria-hidden="true">
+          <i></i><i></i><i></i><i></i><i></i><i></i>
+        </span>
+        <span>
+          <strong>Plate Layout Planner</strong>
+          <small>孔板布局规划工具</small>
+        </span>
+      </a>
+      <div class="topbar-actions">
+        <span class="local-pill"><i></i><span id="saveStatus">仅保存在本机</span></span>
+        <div class="language-switch" role="group" aria-label="Language">
+          <button class="language-option active" data-language="zh" type="button">中</button>
+          <button class="language-option" data-language="en" type="button">EN</button>
+        </div>
+      </div>
+    </header>
+
+    <main id="workspace" class="page-shell">
+      <section class="hero">
+        <div>
+          <h1 data-i18n="heroTitle">自由板布局</h1>
+          <p data-i18n="heroBody">点选、框选或 Shift 连选孔位，叠加参数维度并批量计算；数据仅保存在本机。</p>
+        </div>
+      </section>
+
+      <div class="workspace-grid">
+        <section class="plate-card card">
+          <div class="plate-card-heading">
+            <div class="plate-heading-copy">
+              <div class="plate-title-line">
+                <label class="plate-name-field" title="点击修改孔板名称">
+                  <span class="sr-only">孔板名称</span>
+                  <input id="projectName" class="plate-name-editor" type="text" value="未命名孔板" placeholder="未命名孔板" maxlength="80" aria-label="孔板名称，点击修改" />
+                </label>
+                <div class="history-actions" aria-label="编辑历史">
+                  <button id="undoButton" class="history-button" type="button" title="撤销（Ctrl/⌘ Z）" aria-label="撤销">↶</button>
+                  <button id="redoButton" class="history-button" type="button" title="重做（Ctrl/⌘ Shift Z）" aria-label="重做">↷</button>
+                </div>
+              </div>
+              <div class="plate-spec-row">
+                <div class="plate-picker" role="group" aria-label="孔板规格">
+                  <button class="plate-option" data-size="6" type="button">6 孔</button>
+                  <button class="plate-option" data-size="12" type="button">12 孔</button>
+                  <button class="plate-option active" data-size="24" type="button">24 孔</button>
+                  <button class="plate-option" data-size="96" type="button">96 孔</button>
+                  <button class="plate-option" data-size="384" type="button">384 孔</button>
+                </div>
+                <p data-i18n="selectionHelp">单击逐孔选择，拖动框选，Shift 单击连续选择。</p>
+              </div>
+            </div>
+            <div class="plate-heading-tools">
+              <div class="selection-actions" aria-label="孔位选择操作">
+                <span id="selectionCount" class="selection-count">已选 0 孔</span>
+                <button id="selectAllButton" class="text-button" type="button" data-i18n="selectAll">全选</button>
+                <button id="invertSelectionButton" class="text-button" type="button" data-i18n="invert">反选</button>
+                <button id="clearSelectionButton" class="text-button" type="button" data-i18n="deselect">取消选择</button>
+                <button id="clearWellsButton" class="text-button danger-text" type="button" data-i18n="clearWells">清空所选孔</button>
+              </div>
+              <div class="plate-utility-stack">
+                <label class="color-control">
+                  <span data-i18n="colorBy">按参数着色</span>
+                  <select id="colorDimension"></select>
+                </label>
+                <div class="export-actions plate-export-actions" aria-label="导出布局">
+                  <button id="exportCsvButton" class="secondary-button" type="button">CSV</button>
+                  <button id="exportSvgButton" class="secondary-button" type="button">SVG</button>
+                  <button id="exportJsonButton" class="primary-button" type="button" data-i18n="backup">备份</button>
+                  <label id="importJsonLabel" class="secondary-button file-button"><span data-i18n="import">导入</span><input id="importJsonInput" type="file" accept="application/json,.json" hidden /></label>
+                  <button id="confirmImportButton" class="secondary-button inline-confirm-button" type="button" hidden>确认导入</button>
+                  <button id="printButton" class="text-button" type="button" data-i18n="print">打印 / PDF</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="plate-scroll">
+            <div id="plateCanvas" class="plate-canvas" aria-label="可交互孔板布局">
+              <div id="plateGrid" class="plate-grid"></div>
+              <div id="selectionBox" class="selection-box" hidden></div>
+            </div>
+          </div>
+          <div class="plate-footer-row">
+            <div id="plateLegend" class="plate-legend" aria-label="孔板颜色图例"></div>
+            <p id="wellDisplayNote" class="well-display-note">孔内最多显示孔号和 2 条参数摘要。点选孔位可查看全部信息。</p>
+          </div>
+        </section>
+
+        <aside class="side-stack">
+          <details class="card parameter-card collapsible-card" open>
+            <summary class="collapsible-summary">
+              <div>
+                <h2 data-i18n="dimensionsTitle">参数维度</h2>
+                <p data-i18n="dimensionsBody">定义实验标签，再应用到当前选择。</p>
+              </div>
+              <span class="collapsible-summary-meta"><span id="dimensionCount" class="count-badge">0</span><span class="collapse-toggle" aria-hidden="true"></span></span>
+            </summary>
+            <div class="collapsible-content">
+
+            <form id="addDimensionForm" class="add-dimension-form">
+              <label>
+                <span data-i18n="newDimension">新维度名称</span>
+                <input id="newDimensionName" type="text" placeholder="例如：细胞系、药物、批次" data-i18n-placeholder="newDimensionPlaceholder" maxlength="30" required />
+              </label>
+              <label>
+                <span data-i18n="type">类型</span>
+                <select id="newDimensionType">
+                  <option value="text">文本</option>
+                  <option value="number">数值</option>
+                </select>
+              </label>
+              <button class="secondary-button add-button" type="submit" data-i18n="add">＋ 添加</button>
+            </form>
+
+            <div id="dimensionList" class="dimension-list"></div>
+
+            <div class="panel-divider"></div>
+            <div id="selectedWellSummary" class="selected-well-summary" aria-live="polite"></div>
+            <div class="selection-editor-head">
+              <div>
+                <h3 data-i18n="assignTitle">为所选孔赋值</h3>
+                <p data-i18n="assignBody">修改输入框会自动勾选该维度，只应用已勾选项。</p>
+              </div>
+              <span id="editorSelectionCount">0 孔</span>
+            </div>
+            <div id="selectionEditor" class="selection-editor"></div>
+            <div class="editor-actions">
+              <button id="applyParametersButton" class="primary-button" type="button" data-i18n="applySelected">应用到所选孔</button>
+              <button id="clearParametersButton" class="secondary-button" type="button" data-i18n="clearChecked">清除勾选参数</button>
+            </div>
+            </div>
+          </details>
+
+          <details class="card calculation-card collapsible-card" open>
+            <summary class="collapsible-summary">
+              <div>
+                <h2 data-i18n="calculationTitle">条件批量计算</h2>
+                <p data-i18n="calculationBody">按孔位标签筛选，对数值参数统一运算。</p>
+              </div>
+              <span class="collapse-toggle" aria-hidden="true"></span>
+            </summary>
+            <div class="collapsible-content">
+            <p class="panel-note">例：全部“处理 = Drug A”的孔，将“原始值”乘以“稀释倍数”，写入“校正值”。仅处理可解析的数值。</p>
+
+            <div class="calc-grid">
+              <label><span>作用范围</span><select id="calcScope"><option value="selected">当前所选孔</option><option value="all">当前板全部孔</option></select></label>
+              <label><span>条件维度（可选）</span><select id="calcConditionDimension"></select></label>
+              <label class="calc-wide"><span>条件值（精确匹配）</span><input id="calcConditionValue" list="conditionValueSuggestions" type="text" placeholder="留空时匹配空值；无条件请选择“不筛选”" /><datalist id="conditionValueSuggestions"></datalist></label>
+              <label><span>源数值维度</span><select id="calcSource"></select></label>
+              <label><span>运算</span><select id="calcOperation"><option value="multiply">× 乘以</option><option value="divide">÷ 除以</option><option value="add">＋ 加上</option><option value="subtract">－ 减去</option></select></label>
+              <label><span>右侧值来源</span><select id="operandMode"><option value="constant">固定数值</option><option value="parameter">另一个数值维度</option></select></label>
+              <label id="constantOperandWrap"><span>固定数值</span><input id="constantOperand" type="number" step="any" value="1" /></label>
+              <label id="parameterOperandWrap" hidden><span>右侧数值维度</span><select id="parameterOperand"></select></label>
+              <label><span>结果维度名称</span><input id="calcOutputName" type="text" value="计算结果" maxlength="30" /></label>
+              <label><span>保留小数位</span><input id="calcPrecision" type="number" min="0" max="12" value="4" /></label>
+            </div>
+            <button id="runCalculationButton" class="primary-button full" type="button" data-i18n="runCalculation">运行批量计算</button>
+            <div id="calculationResult" class="calculation-result" aria-live="polite"></div>
+            </div>
+          </details>
+        </aside>
+      </div>
+
+      <footer>
+        <span data-i18n="footerLocal">所有编辑与计算均在当前浏览器完成。</span>
+        <span data-i18n="footerReview">研究工具 · 请在实验前复核最终板图和参数。</span>
+      </footer>
+    </main>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <script src="core.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>

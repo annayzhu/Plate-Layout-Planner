@@ -1,4 +1,4 @@
-import { mkdir } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
 const playwrightModule = process.env.PLAYWRIGHT_MODULE_URL || "playwright";
@@ -73,63 +73,130 @@ try {
   const reorderedWellLines = await page.locator('[data-well="A1"] .well-primary, [data-well="A1"] .well-secondary, [data-well="A1"] .well-tertiary').allInnerTexts();
   if (reorderedWellLines.join("|") !== "2|Sample-A|Drug A") throw new Error(`Well display did not follow reordered parameters: ${reorderedWellLines.join("|")}`);
 
-  await page.locator("#calcConditionDimension").selectOption("sample");
-  await page.locator("#calcConditionValue").fill("Sample-A");
-  await page.locator("#calcSource").selectOption("value");
-  await page.locator("#constantOperand").fill("5");
-  await page.locator("#calcOutputName").fill("校正值");
-  const calculationGuide = await page.locator("#calculationGuide").innerText();
-  if (!calculationGuide.includes("原始值 × 5 → 校正值") || !calculationGuide.includes("样本") || !calculationGuide.includes("Sample-A")) {
-    throw new Error(`Calculation guide did not explain the active formula: ${calculationGuide}`);
-  }
-  const calculationLabels = await page.locator(".calc-grid label > span").allInnerTexts();
-  for (const expectedLabel of ["要计算的数值", "用什么数参与计算", "结果保存为"]) {
-    if (!calculationLabels.includes(expectedLabel)) throw new Error(`Missing plain-language calculation label: ${expectedLabel}`);
-  }
-  await page.locator("#runCalculationButton").click();
-  const resultText = await page.locator("#calculationResult").innerText();
-  if (!resultText.includes("3 孔已写入")) throw new Error(`Unexpected calculation result: ${resultText}`);
-  if (!(await page.locator("#colorDimension option:checked").innerText()).startsWith("校正值")) {
-    throw new Error("Plate coloring did not switch to the calculation output.");
-  }
-  if ((await page.locator('[data-well="A1"] .well-primary').innerText()) !== "2") throw new Error("Color selection unexpectedly replaced the first displayed parameter.");
-  if (!resultText.includes("孔板已自动切换") || await page.locator(".calculation-view-result").count() !== 1) {
-    throw new Error(`Calculation result did not explain where values were stored: ${resultText}`);
-  }
-  await page.locator(".calculation-view-result").click();
-  if ((await page.locator("#selectionCount").innerText()) !== "已选 1 孔") throw new Error("View-result action did not select a result well.");
-  if (await page.locator(".calculation-output-item").count() !== 1 || !(await page.locator(".calculation-output-item").innerText()).includes("将作为一列导出")) {
-    throw new Error("First calculation did not create an export-aware result entry.");
-  }
-
-  await page.locator('[data-well="A3"]').click({ modifiers: ["Shift"] });
-  const secondGuide = await page.locator("#calculationGuide").innerText();
-  if (!secondGuide.includes("→ 校正值 2")) throw new Error(`Next calculation name was not made unique: ${secondGuide}`);
-  await page.locator("#runCalculationButton").click();
-  if (await page.locator(".calculation-output-item").count() !== 2) throw new Error("Second calculation did not create a new result entry.");
-  let outputNames = await page.locator(".calculation-output-main strong").allInnerTexts();
-  if (outputNames.join("|") !== "校正值|校正值 2") throw new Error(`Unexpected calculation output list: ${outputNames.join("|")}`);
-  await page.locator('.calculation-output-item[data-output]').nth(1).locator('[data-action="up"]').click();
-  outputNames = await page.locator(".calculation-output-main strong").allInnerTexts();
-  if (outputNames.join("|") !== "校正值 2|校正值") throw new Error(`Calculation outputs did not move up: ${outputNames.join("|")}`);
-  const exportedResultOrder = await page.evaluate(() => {
-    const saved = JSON.parse(localStorage.getItem("plate-layout-studio:project:v1"));
-    return saved.dimensions.slice(-2).map((dimension) => dimension.name);
-  });
-  if (exportedResultOrder.join("|") !== "校正值 2|校正值") throw new Error(`Dimension/export order did not follow result entries: ${exportedResultOrder.join("|")}`);
-  const firstOutput = page.locator(".calculation-output-item").first();
-  await firstOutput.locator('[data-action="delete"]').click();
-  await page.locator('.calculation-output-delete.confirming').click();
-  if (await page.locator(".calculation-output-item").count() !== 1 || (await page.locator(".calculation-output-main strong").innerText()) !== "校正值") {
-    throw new Error("Deleting a calculation entry did not remove exactly its result column.");
-  }
-  const deletedResultStillExists = await page.locator(".well").evaluateAll((wells) => wells.some((well) => well.title.includes("校正值 2:")));
-  if (deletedResultStillExists) throw new Error("Deleted calculation values still remained in wells.");
-
   await page.locator("#clearSelectionButton").click();
   await page.locator('[data-well="A1"]').click();
+  await page.locator('[data-well="A4"]').click({ modifiers: ["Shift"] });
+  if ((await page.locator("#selectionCount").innerText()) !== "已选 4 孔") throw new Error("Could not establish the four-well calculator scope.");
+
+  await page.locator('.liquid-module-launch[data-liquid-module="transfection"]').click();
+  if (await page.locator("#liquidDrawer").isHidden()) throw new Error("Liquid preparation drawer did not open.");
+  let transfectionForm = page.locator("#liquidActiveForm");
+  const initialWellCount = transfectionForm.locator('[name="wellCount"]');
+  if ((await initialWellCount.inputValue()) !== "4" || await initialWellCount.isEditable()) {
+    throw new Error("The plate-linked well count was not rendered as a read-only four-well scope.");
+  }
+  const scopeHelp = await transfectionForm.locator(".liquid-scope-help").innerText();
+  if (!scopeHelp.includes("关闭") || !scopeHelp.includes("重新选择")) throw new Error(`Well-count guidance is missing: ${scopeHelp}`);
+  await transfectionForm.locator('[name="cargoName"]').fill("custom-siRNA");
+  await transfectionForm.locator('[name="overagePercent"]').fill("20");
+  await page.locator("#closeLiquidDrawerButton").click();
+
+  await page.locator("#selectAllButton").click();
+  await page.locator('.liquid-module-launch[data-liquid-module="transfection"]').click();
+  transfectionForm = page.locator("#liquidActiveForm");
+  if ((await transfectionForm.locator('[name="wellCount"]').inputValue()) !== "24") throw new Error("Reopening after selecting the full plate did not refresh the well count to 24.");
+  if ((await transfectionForm.locator('[name="cargoName"]').inputValue()) !== "custom-siRNA" || (await transfectionForm.locator('[name="overagePercent"]').inputValue()) !== "20") {
+    throw new Error("Transfection inputs were not preserved while the plate scope changed.");
+  }
+  await transfectionForm.locator('button[type="submit"]').click();
+  const liquidResultText = await page.locator("#liquidResultHost").innerText();
+  for (const expected of ["8.64 µL", "423.36 µL", "25.92 µL", "406.08 µL"]) {
+    if (!liquidResultText.includes(expected)) throw new Error(`Transfection result is missing ${expected}: ${liquidResultText}`);
+  }
+  if (!liquidResultText.includes("A 管加入 siRNA") || !liquidResultText.includes("室温孵育 5 min") || !liquidResultText.includes("24 孔")) {
+    throw new Error(`Transfection checklist is incomplete: ${liquidResultText}`);
+  }
+  await page.screenshot({ path: resolve(outputDirectory, "02-liquid-transfection.png"), fullPage: true });
+  await page.locator('[data-liquid-action="save"]').click();
+  const savedLiquidPlans = await page.evaluate(() => JSON.parse(localStorage.getItem("plate-layout-studio:project:v1")).liquidPlans || []);
+  if (savedLiquidPlans.length !== 1 || savedLiquidPlans[0].module !== "transfection") throw new Error("Transfection recipe was not saved with the project.");
+  if (await page.locator("[data-lipo-only]:visible").count()) throw new Error("Lipofectamine-only fields were visible in the RNAiMAX preset.");
+
+  await page.locator('#liquidModuleTabs [data-liquid-module="basic"]').click();
+  await page.locator('#liquidActiveForm [name="stockConcentration"]').fill("77");
+  await page.locator('#liquidModuleTabs [data-liquid-module="transfection"]').click();
+  transfectionForm = page.locator("#liquidActiveForm");
+  if ((await transfectionForm.locator('[name="cargoName"]').inputValue()) !== "custom-siRNA") throw new Error("Transfection draft was lost after switching modules.");
+  await page.locator('#liquidModuleTabs [data-liquid-module="basic"]').click();
+  if ((await page.locator('#liquidActiveForm [name="stockConcentration"]').inputValue()) !== "77") throw new Error("Basic-solution draft was lost after switching modules.");
+  await page.locator('#liquidActiveForm [data-liquid-action="reset"]').click();
+  if ((await page.locator('#liquidActiveForm [name="stockConcentration"]').inputValue()) !== "10") throw new Error("Reset did not restore only the active module defaults.");
+
+  await page.locator('#liquidModuleTabs [data-liquid-module="transfection"]').click();
+  transfectionForm = page.locator("#liquidActiveForm");
+  await transfectionForm.locator('[name="preset"]').selectOption("lipo3000");
+  if (await page.locator("[data-lipo-only]:visible").count() !== 2) throw new Error("Lipofectamine 3000 fields did not appear after switching presets.");
+  await transfectionForm.locator('button[type="submit"]').click();
+  const lipoResultText = await page.locator("#liquidResultHost").innerText();
+  if (!lipoResultText.includes("P3000") || !lipoResultText.includes("Lipofectamine 3000")) throw new Error(`Lipofectamine 3000 two-tube result is incomplete: ${lipoResultText}`);
+
+  await transfectionForm.locator('[name="preset"]').selectOption("custom-one");
+  await transfectionForm.locator('[name="finalVolume"]').fill("100");
+  await transfectionForm.locator('[name="complexVolume"]').fill("20");
+  await transfectionForm.locator('[name="cargoLines"]').fill("siRNA,siRNA,10,µM,final-concentration,0.1,nM,");
+  await transfectionForm.locator('[name="tubeLines"]').fill("A,20,siRNA,cargo,,siRNA,yes\nA,20,Transfection reagent,fixed,1,,no\nA,20,Opti-MEM,diluent,,,yes");
+  await transfectionForm.locator('[name="workingSolutionMode"]').selectOption("apply");
+  await transfectionForm.locator('button[type="submit"]').click();
+  const customTransfectionText = await page.locator("#liquidResultHost").innerText();
+  if (!customTransfectionText.includes("working solution") || !customTransfectionText.includes("已确认应用")) {
+    throw new Error(`Confirmed working-solution calculation was not applied: ${customTransfectionText}`);
+  }
+  await page.screenshot({ path: resolve(outputDirectory, "02c-custom-transfection-and-library.png"), fullPage: true });
+  await page.locator('[data-liquid-action="save-preset"]').click();
+  const customRecipeIds = await page.locator("[data-liquid-library-select] option").evaluateAll((options) => options.map((option) => option.value).filter((value) => value.startsWith("liquid_")));
+  if (customRecipeIds.length !== 1) throw new Error("Saving a reusable recipe did not add one editable library item.");
+  await page.locator("[data-liquid-library-select]").selectOption("builtin-rnai");
+  await page.locator('[data-liquid-action="copy-preset"]').click();
+  const editableRecipeIds = await page.locator("[data-liquid-library-select] option").evaluateAll((options) => options.map((option) => option.value).filter((value) => !value.startsWith("builtin-")));
+  if (editableRecipeIds.length !== 2) throw new Error("Copying a built-in recipe did not create an editable recipe.");
+  await page.locator("[data-liquid-library-select]").selectOption(editableRecipeIds.at(-1));
+  await page.locator('[data-liquid-action="delete-preset"]').click();
+  if (await page.locator(`[data-liquid-library-select] option[value="${editableRecipeIds.at(-1)}"]`).count()) throw new Error("Editable recipe was not deleted.");
+  const recipeDownloadPromise = page.waitForEvent("download");
+  await page.locator('[data-liquid-action="export-presets"]').click();
+  const recipeDownload = await recipeDownloadPromise;
+  const recipePath = await recipeDownload.path();
+  await page.locator("[data-liquid-library-import]").setInputFiles(recipePath);
+  if (await page.locator("[data-liquid-library-select] option").count() < 5) throw new Error("Exported recipe JSON was not imported back into the library.");
+
+  await page.locator('#liquidModuleTabs [data-liquid-module="basic"]').click();
+  await page.locator('#liquidActiveForm button[type="submit"]').click();
+  const basicResultText = await page.locator("#liquidResultHost").innerText();
+  if (!basicResultText.includes("110 µL") || !basicResultText.includes("10,890 µL")) throw new Error(`Routine dilution result is incorrect: ${basicResultText}`);
+
+  await page.locator('#liquidModuleTabs [data-liquid-module="serial"]').click();
+  await page.locator('#liquidActiveForm [name="strategy"]').selectOption("serial");
+  await page.locator('#liquidActiveForm [name="points"]').fill("3");
+  await page.locator('#liquidActiveForm [name="volumePerLevel"]').fill("100");
+  await page.locator('#liquidActiveForm [name="overagePercent"]').fill("0");
+  await page.locator('#liquidActiveForm button[type="submit"]').click();
+  if (await page.locator("#liquidResultHost .liquid-table tbody tr").count() !== 3) throw new Error("Serial dilution did not produce three concentration levels.");
+  const serialText = await page.locator("#liquidResultHost").innerText();
+  for (const expected of ["175 µL", "150 µL", "100 µL", "最终保留"]) if (!serialText.includes(expected)) throw new Error(`Backward serial-volume calculation is missing ${expected}: ${serialText}`);
+  await page.locator("#closeLiquidDrawerButton").click();
+
+  if (await page.locator("#clearSelectionButton").isEnabled()) await page.locator("#clearSelectionButton").click();
+  await page.locator('.liquid-module-launch[data-liquid-module="drug"]').click();
+  await page.locator('[name="drugLines"]').fill("Drug A,10000,100,0.78,8,2,2");
+  await page.locator('#liquidActiveForm button[type="submit"]').click();
+  if (await page.locator(".liquid-preview-well").count() !== 16 || await page.locator('[data-liquid-action="apply-layout"]').count() !== 1) {
+    throw new Error("Drug gradient did not generate a 16-well preview with an explicit confirm action.");
+  }
+  await page.locator('[name="drugLines"]').fill("Drug A,10000,10,1,4,range,log,1,10,DMSO,100");
+  await page.locator('[name="avoidEdges"]').selectOption("on");
+  await page.locator('[name="controlsPerDrug"]').fill("1");
+  await page.locator('#liquidActiveForm button[type="submit"]').click();
+  const drugResultText = await page.locator("#liquidResultHost").innerText();
+  if (!drugResultText.includes("加药液浓度") || !drugResultText.includes("孔内溶剂终比例") || await page.locator(".liquid-preview-well").count() !== 5) {
+    throw new Error(`Drug-specific dosing, vehicle, controls, or edge-safe layout is incomplete: ${drugResultText}`);
+  }
+  await page.screenshot({ path: resolve(outputDirectory, "02d-drug-dosing-and-layout.png"), fullPage: true });
+  await page.locator("#closeLiquidDrawerButton").click();
+
+  if (await page.locator("#clearSelectionButton").isEnabled()) await page.locator("#clearSelectionButton").click();
+  await page.locator('[data-well="A1"]').click();
   const selectedWellSummary = await page.locator("#selectedWellSummary").innerText();
-  for (const expectedText of ["当前孔位 A1", "Sample-A", "原始值", "2", "校正值", "10"]) {
+  for (const expectedText of ["当前孔位 A1", "Sample-A", "原始值", "2"]) {
     if (!selectedWellSummary.includes(expectedText)) throw new Error(`Selected-well summary is missing ${expectedText}: ${selectedWellSummary}`);
   }
   await page.screenshot({ path: resolve(outputDirectory, "02-labeled-and-calculated.png"), fullPage: true });
@@ -285,7 +352,7 @@ try {
   await page.locator('.plate-option[data-size="24"]').click();
   await page.reload({ waitUntil: "networkidle" });
   const restoredA1Title = await page.locator('[data-well="A1"]').getAttribute("title");
-  if (!restoredA1Title?.includes("Sample-A") || !restoredA1Title.includes("校正值: 10")) {
+  if (!restoredA1Title?.includes("Sample-A") || !restoredA1Title.includes("原始值: 1")) {
     throw new Error(`Autosaved well data was not restored: ${restoredA1Title}`);
   }
 
@@ -298,6 +365,19 @@ try {
   await page.locator("#exportSvgButton").click();
   const svgDownload = await svgDownloadPromise;
   if (!svgDownload.suggestedFilename().endsWith("24well.svg")) throw new Error("SVG export filename was unexpected.");
+
+  const templateDownloadPromise = page.waitForEvent("download");
+  await page.locator("#excelTemplateButton").click();
+  const templateDownload = await templateDownloadPromise;
+  if (templateDownload.suggestedFilename() !== "未命名孔板_24well_Excel模板.csv") {
+    throw new Error(`Excel template filename was unexpected: ${templateDownload.suggestedFilename()}`);
+  }
+  const templatePath = await templateDownload.path();
+  const templateCsv = await readFile(templatePath, "utf8");
+  const expectedTemplateStart = "\uFEFF孔位,样本,处理,剂量 (μM),时间点 (h),重复,原始值\r\nA1,S001,Drug A,1,24,1,\r\nA2,S002,Drug A,1,24,2,";
+  if (!templateCsv.startsWith(expectedTemplateStart) || !templateCsv.includes("\r\nD6,,,,,,")) {
+    throw new Error(`Excel template content was unexpected: ${templateCsv.slice(0, 180)}`);
+  }
 
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.locator('.language-option[data-language="en"]').click();
@@ -325,6 +405,12 @@ try {
   if (Math.max(...toolbarHeights) - Math.min(...toolbarHeights) > 2) {
     throw new Error(`Plate control heights are inconsistent: ${toolbarHeights.join(", ")}`);
   }
+  await page.locator('.liquid-module-launch[data-liquid-module="transfection"]').click();
+  const englishScopeHelp = (await page.locator(".liquid-scope-help").innerText()).toLowerCase();
+  if (!englishScopeHelp.includes("close") || !englishScopeHelp.includes("reselect")) {
+    throw new Error(`English well-count guidance is incomplete: ${englishScopeHelp}`);
+  }
+  await page.locator("#closeLiquidDrawerButton").click();
   await page.screenshot({ path: resolve(outputDirectory, "05-compact-english-header.png"), fullPage: true });
   await page.locator('.language-option[data-language="zh"]').click();
 
@@ -333,6 +419,14 @@ try {
   const pageWidths = await page.evaluate(() => ({ viewport: document.documentElement.clientWidth, page: document.documentElement.scrollWidth }));
   if (pageWidths.page > pageWidths.viewport + 1) throw new Error(`Mobile page overflowed horizontally: ${JSON.stringify(pageWidths)}`);
   await page.screenshot({ path: resolve(outputDirectory, "05-mobile-24-well.png"), fullPage: true });
+  await page.locator('.liquid-module-launch[data-liquid-module="transfection"]').click();
+  const mobileDrawerWidths = await page.locator("#liquidDrawer").evaluate((drawer) => ({ client: drawer.clientWidth, scroll: drawer.scrollWidth }));
+  if (mobileDrawerWidths.scroll > mobileDrawerWidths.client + 1) {
+    throw new Error(`Mobile liquid drawer overflowed horizontally: ${JSON.stringify(mobileDrawerWidths)}`);
+  }
+  if (!(await page.locator(".liquid-scope-help").isVisible())) throw new Error("Mobile liquid drawer hid the plate-scope guidance.");
+  await page.screenshot({ path: resolve(outputDirectory, "05b-mobile-liquid-drawer.png"), fullPage: true });
+  await page.locator("#closeLiquidDrawerButton").click();
 
   await page.locator('.language-option[data-language="en"]').click();
   if ((await page.locator(".hero h1").innerText()) !== "Free Plate Layout") throw new Error("English UI did not activate.");
@@ -340,6 +434,49 @@ try {
   await page.reload({ waitUntil: "networkidle" });
   if ((await page.locator(".hero h1").innerText()) !== "Free Plate Layout") throw new Error("English preference was not restored after reload.");
   await page.locator('.language-option[data-language="zh"]').click();
+
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  const importCsv = [
+    "\uFEFF孔位,样本,处理,剂量 (μM),时间点 (h),备注",
+    "A1,S001,Drug A,1,24,对照",
+    "A2,S002,Drug B,2.5,48,\"含,逗号\"",
+    "C4,S012,Control,0,24,",
+  ].join("\r\n");
+  if ((await page.locator("#importJsonLabel").innerText()).trim() !== "导入表格") {
+    throw new Error(`Spreadsheet import is not clearly labeled: ${await page.locator("#importJsonLabel").innerText()}`);
+  }
+  await page.locator("#importJsonInput").setInputFiles({ name: "实验板_12well.csv", mimeType: "text/csv", buffer: Buffer.from(importCsv) });
+  await page.locator("#confirmImportButton").click();
+  if (await page.locator(".well").count() !== 12) throw new Error("CSV import did not switch to the inferred 12-well plate.");
+  if ((await page.locator("#projectName").inputValue()) !== "实验板") throw new Error("CSV filename did not become the imported plate name.");
+  const importedA2Title = await page.locator('[data-well="A2"]').getAttribute("title");
+  for (const expected of ["样本: S002", "处理: Drug B", "剂量 (μM): 2.5", "时间点 (h): 48", "备注: 含,逗号"]) {
+    if (!importedA2Title?.includes(expected)) throw new Error(`CSV import lost ${expected}: ${importedA2Title}`);
+  }
+  if ((await page.locator('.dimension-row[data-dimension="dose"] .dimension-unit-input').inputValue()) !== "μM") throw new Error("CSV unit μM was not imported.");
+  await page.screenshot({ path: resolve(outputDirectory, "06-spreadsheet-import.png"), fullPage: true });
+
+  const legacyProject = {
+    version: 1,
+    name: "Legacy project",
+    plateSize: 6,
+    dimensions: [{ id: "sample", name: "样本", type: "text" }],
+    plates: { 6: { A1: { params: { sample: "Legacy-A" } } } },
+    colorDimension: "sample",
+    calculationLog: [],
+    calculationOutputs: [],
+  };
+  await page.locator("#importJsonInput").setInputFiles({
+    name: "legacy-project.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(JSON.stringify(legacyProject)),
+  });
+  await page.locator("#confirmImportButton").click();
+  if (await page.locator(".well").count() !== 6) throw new Error("Legacy JSON import did not restore the six-well plate.");
+  const legacyA1Title = await page.locator('[data-well="A1"]').getAttribute("title");
+  if (!legacyA1Title?.includes("Legacy-A")) throw new Error(`Legacy JSON import lost A1 data: ${legacyA1Title}`);
+  const legacyLiquidPlans = await page.evaluate(() => JSON.parse(localStorage.getItem("plate-layout-studio:project:v1")).liquidPlans);
+  if (!Array.isArray(legacyLiquidPlans) || legacyLiquidPlans.length !== 0) throw new Error("Legacy JSON import did not normalize missing liquid plans.");
 
   if (errors.length) throw new Error(`Browser errors:\n${errors.join("\n")}`);
   console.log(JSON.stringify({
@@ -355,17 +492,22 @@ try {
     full96Paste: "96 values filled A1 through H12 in N order",
     spacedSampleIds: "96 space-separated IDs detected as a batch; B3 overflowed safely and A1 filled all wells",
     renamedParameter: "assignment label followed parameter rename",
-    calculation: resultText,
-    calculationGuide: "plain-language labels and live formula preview verified",
-    calculationVisibility: "output promoted on plate with a working view-result action",
-    calculationEntries: "created two entries, reordered export columns, and deleted one result with its well values",
+    liquidPreparation: "RNAiMAX scope changed from 4 to 24 wells while draft inputs persisted; 24-well totals matched 8.64/423.36/25.92/406.08 µL",
+    liquidProjectSave: "transfection recipe persisted in the project JSON",
+    liquidScopeAcceptance: "read-only selected-well scope, English guidance, mobile drawer, and legacy JSON compatibility passed",
+    advancedTransfection: "custom cargo/tube definitions and confirmed working-solution application passed",
+    recipeLibrary: "save, copy, delete, JSON export, and JSON import passed",
+    serialDilution: "stepwise preparation accumulated downstream transfers backwards and retained each target volume",
+    drugDosing: "per-drug generation, dosing concentration, vehicle fraction, control wells, and edge-safe layout passed",
     selectedWellSummary: "shows all assigned values for A1",
     plateSizes: [6, 12, 24, 96, 384],
     autosave: "restored after reload",
     exports: [csvDownload.suggestedFilename(), svgDownload.suggestedFilename()],
+    excelTemplate: templateDownload.suggestedFilename(),
     compactHeader: "well actions, color control, and exports align in one row; English plate options stay on one row",
     editablePlateName: "subtle dashed underline and text cursor expose inline editing without another button",
     interactionHelp: "selection instructions sit inside the plate visualization above the wells",
+    spreadsheetImport: "Excel-compatible CSV created a 12-well plate with units and quoted values",
     mobilePageWidth: pageWidths,
     languageSwitch: "Chinese and English persisted across reload",
     screenshots: outputDirectory,

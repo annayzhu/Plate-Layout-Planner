@@ -471,11 +471,11 @@ label > span { display: block; margin-bottom: 5px; color: var(--muted); font-siz
 .fixed-reagent-list { display: grid; gap: 8px; margin: 9px 0; }
 .fixed-reagent-row { position: relative; display: grid; grid-template-columns: minmax(0,1fr); width: 100%; max-width: 100%; gap: 8px; padding: 10px 38px 10px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-strong); }
 .fixed-reagent-row > .icon-button { position: absolute; top: 8px; right: 8px; width: 25px; height: 25px; }
-.fixed-ratio-sentence { display: grid; grid-template-columns: max-content minmax(0,1fr); align-items: end; gap: 6px 8px; min-width: 0; }
-.fixed-ratio-sentence > span { flex: 0 0 auto; padding-bottom: 8px; color: var(--muted); font-size: 8px; }
+.fixed-ratio-sentence { display: grid; grid-template-columns: minmax(0,1fr); gap: 8px; min-width: 0; }
+.fixed-ratio-sentence > label { display: grid; gap: 4px; min-width: 0; }
 .fixed-ratio-sentence .liquid-inline-input { grid-template-columns: minmax(72px,1fr) 72px; width: 100%; min-width: 0; }
 .fixed-ratio-sentence input, .fixed-ratio-sentence select { width: 100%; min-width: 0; }
-.fixed-reagent-row > small { grid-column: 1 / -1; color: var(--pine); font-size: 8px; }
+.fixed-reagent-row > small { grid-column: 1 / -1; color: var(--pine); font-size: 8px; line-height: 1.45; }
 .liquid-result-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
 .liquid-result-meta span { padding: 4px 7px; border-radius: 7px; background: var(--pine-soft); color: var(--pine); font-size: 8px; font-weight: 780; }
 .liquid-table-wrap { max-width: 100%; overflow: auto; border: 1px solid var(--line); border-radius: 10px; }

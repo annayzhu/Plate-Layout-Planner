@@ -16,6 +16,11 @@ test("shift range follows row-major plate order", () => {
   assert.deepEqual(Core.rangeSelection(6, "B2", "A3"), ["A3", "B1", "B2"]);
 });
 
+test("export order supports N by default and optional Z", () => {
+  assert.deepEqual(Core.orderedWellIds(6), ["A1", "B1", "A2", "B2", "A3", "B3"]);
+  assert.deepEqual(Core.orderedWellIds(6, "Z"), ["A1", "A2", "A3", "B1", "B2", "B3"]);
+});
+
 test("rectangle selection includes the geometric block", () => {
   assert.deepEqual(Core.rectangleSelection(24, "B2", "D4"), [
     "B2", "B3", "B4", "C2", "C3", "C4", "D2", "D3", "D4",

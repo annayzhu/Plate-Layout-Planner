@@ -98,9 +98,9 @@
       "calcSource", "calcOperation", "operandMode", "constantOperandWrap", "constantOperand",
       "parameterOperandWrap", "parameterOperand", "calcOutputName", "calcPrecision",
       "calculationGuide", "runCalculationButton", "calculationResult", "calculationOutputCount", "calculationOutputList", "exportCsvButton", "exportSvgButton",
-      "exportJsonButton", "excelTemplateButton", "importJsonLabel", "importJsonInput", "importModeSelect", "confirmImportButton", "printButton",
+      "exportJsonButton", "exportXlsxButton", "xlsxOrderSelect", "excelTemplateButton", "importJsonLabel", "importJsonInput", "importModeSelect", "confirmImportButton", "printButton",
       "workspaceName", "workspaceNameLabel", "plateTabs", "addPlateButton", "duplicatePlateButton", "copyStructureButton", "movePlateLeftButton", "movePlateRightButton", "deletePlateButton", "overviewToggleButton", "plateOverview", "plateOverviewTitle", "plateOverviewDescription", "overviewColorLabel", "overviewColorDimension", "plateOverviewGrid", "exportXlsxButton",
-      "liquidScopeBadge", "openLiquidCalculatorButton", "projectLiquidScope", "projectLiquidOverage", "projectLiquidSummaryButton", "projectLiquidPlatePicker", "projectLiquidSummary", "liquidDrawer", "closeLiquidDrawerButton", "liquidDrawerScope", "liquidModuleTabs", "liquidDrawerContent", "toast",
+      "liquidScopeBadge", "openLiquidCalculatorButton", "projectLiquidScope", "projectLiquidOverage", "projectLiquidContainerCapacity", "projectLiquidSummaryButton", "projectLiquidPlatePicker", "projectLiquidSummary", "liquidDrawer", "closeLiquidDrawerButton", "liquidDrawerScope", "liquidModuleTabs", "liquidDrawerContent", "toast",
     ].map((id) => [id, document.getElementById(id)]),
   );
 
@@ -1216,6 +1216,8 @@
     document.getElementById("projectLiquidTitle").textContent = bilingual("跨板配液汇总", "Cross-plate liquid summary");
     document.querySelector(".project-liquid-heading p").textContent = bilingual("合并相同配方的基础需求量，再统一加入一次余量。", "Merge compatible base requirements, then apply one shared overage.");
     document.querySelector(".project-liquid-overage > span:first-child").textContent = bilingual("统一余量", "Shared overage");
+    document.querySelector(".project-liquid-capacity > span:first-child").textContent = bilingual("单管上限", "Container limit");
+    elements.projectLiquidContainerCapacity.placeholder = bilingual("不限", "No limit");
     document.querySelector(".project-liquid-controls label > span").textContent = bilingual("汇总范围", "Summary scope");
     elements.projectLiquidScope.options[0].textContent = bilingual("当前板", "Current plate");
     elements.projectLiquidScope.options[1].textContent = bilingual("勾选板", "Checked plates");
@@ -1226,7 +1228,7 @@
     if (!workspace.latestLiquidSummary) elements.projectLiquidSummary.innerHTML = "";
   }
 
-  function aggregateLiquidPlans(plates, overagePercent) {
+  function aggregateLiquidPlans(plates, overagePercent, maxContainerVolume = Infinity) {
     const contributions = [];
     const skipped = [];
     for (const plate of plates) {
@@ -1236,13 +1238,13 @@
         else contributions.push(...plan.contributions.map((item) => ({ ...item, plateId: plate.id, plateName: plate.name })));
       }
     }
-    return { merged: Workspace.mergeLiquidContributions(contributions, { overagePercent, minPipetteVolume: 1 }), skipped, contributionCount: contributions.length };
+    return { merged: Workspace.mergeLiquidContributions(contributions, { overagePercent, minPipetteVolume: 1, maxContainerVolume }), skipped, contributionCount: contributions.length };
   }
 
   function renderProjectLiquidSummary(summary) {
     if (!summary) { elements.projectLiquidSummary.innerHTML = ""; return; }
     const rows = summary.groups.flatMap((group) => group.components.map((component) => [
-      group.key.split(":", 1)[0], component.name, group.plates.map((plate) => plate.plateName).join("、"), `${liquidNumber(component.baseVolume)} µL`, `${liquidNumber(component.preparedVolume)} µL`, String(component.containerCount), component.warning ? bilingual("存在单板移液量低于 1 µL", "A per-plate transfer is below 1 µL") : "",
+      group.key.split(":", 1)[0], component.name, component.perPlate.map((item) => `${group.plates.find((plate) => plate.plateId === item.plateId)?.plateName || item.plateId}: ${liquidNumber(item.volume)} µL`).join("；"), `${liquidNumber(component.baseVolume)} µL`, `${liquidNumber(component.preparedVolume)} µL`, String(component.containerCount), component.warning ? bilingual("存在单板移液量低于 1 µL", "A per-plate transfer is below 1 µL") : "",
     ]));
     const skipped = summary.skipped?.length ? `<div class="project-liquid-summary-note warning">${escapeHtml(bilingual(`有 ${summary.skipped.length} 个旧方案没有可合并明细，请重新打开计算并保存：${summary.skipped.join("；")}`, `${summary.skipped.length} legacy plans have no mergeable detail; recalculate and save them: ${summary.skipped.join("; ")}`))}</div>` : "";
     const note = `<div class="project-liquid-summary-note">${escapeHtml(bilingual(`已汇总 ${summary.plateNames.length} 块板；相同配方先合并，再统一加入 ${summary.overagePercent}% 余量。此结果会写入 XLSX。`, `${summary.plateNames.length} plates summarized; compatible recipes were merged before one ${summary.overagePercent}% overage was applied. This result is included in XLSX.`))}</div>`;
@@ -1709,6 +1711,9 @@
     elements.addPlateButton.textContent = bilingual("＋ 新建板", "+ New plate");
     elements.duplicatePlateButton.textContent = bilingual("复制整板", "Duplicate plate");
     elements.copyStructureButton.textContent = bilingual("仅复制参数", "Copy parameters");
+    elements.xlsxOrderSelect.options[0].textContent = bilingual("N 序", "N order");
+    elements.xlsxOrderSelect.options[1].textContent = bilingual("Z 序", "Z order");
+    elements.xlsxOrderSelect.title = bilingual("XLSX 加样顺序（默认 N）", "XLSX pipetting order (N by default)");
     elements.overviewToggleButton.textContent = overviewOpen ? bilingual("返回单板", "Single plate") : bilingual("全部板概览", "All plates");
     elements.plateOverviewTitle.textContent = bilingual("全部板概览", "All plates overview");
     elements.plateOverviewDescription.textContent = bilingual("点击任意缩略孔板进入精细编辑。", "Open any miniature plate for detailed editing.");
@@ -2357,13 +2362,16 @@
       return;
     }
     const overagePercent = Math.max(0, Math.min(100, Number(elements.projectLiquidOverage.value) || 0));
-    const { merged, skipped } = aggregateLiquidPlans(plates, overagePercent);
+    const capacityValue = Number(elements.projectLiquidContainerCapacity.value);
+    const maxContainerVolume = Number.isFinite(capacityValue) && capacityValue > 0 ? capacityValue : Infinity;
+    const { merged, skipped } = aggregateLiquidPlans(plates, overagePercent, maxContainerVolume);
     workspace.latestLiquidSummary = {
       id: `liquid_summary_${Date.now().toString(36)}`,
       createdAt: new Date().toISOString(),
       plateIds: plates.map((plate) => plate.id),
       plateNames: plates.map((plate) => plate.name),
       overagePercent,
+      maxContainerVolume: Number.isFinite(maxContainerVolume) ? maxContainerVolume : null,
       groups: merged.groups,
       skipped,
     };
@@ -2763,12 +2771,8 @@
     showToast(bilingual("项目备份已导出", "Project backup exported"));
   });
 
-  function nOrderWellIds(plate) {
-    return Core.makeWellIds(plate.plateSize).sort((leftId, rightId) => {
-      const left = Core.parseWell(plate.plateSize, leftId);
-      const right = Core.parseWell(plate.plateSize, rightId);
-      return left.column - right.column || left.row - right.row;
-    });
+  function exportOrderWellIds(plate) {
+    return Core.orderedWellIds(plate.plateSize, elements.xlsxOrderSelect.value);
   }
 
   function buildWorkspaceWorkbookSheets() {
@@ -2794,7 +2798,7 @@
         bilingual("跨板汇总", "Cross-plate summary"),
         group.key,
         component.name,
-        group.plates.map((plate) => plate.plateName).join("、"),
+        component.perPlate.map((item) => `${group.plates.find((plate) => plate.plateId === item.plateId)?.plateName || item.plateId}: ${liquidNumber(item.volume)} µL`).join("；"),
         `${liquidNumber(component.baseVolume)} µL`,
         `${liquidSummary.overagePercent}%`,
         `${liquidNumber(component.preparedVolume)} µL`,
@@ -2816,7 +2820,7 @@
       const wells = plate.plates[plate.plateSize];
       const treatment = plate.dimensions.find((dimension) => dimension.id === "treatment" || /处理|treatment|试剂|reagent/i.test(dimension.name));
       const volume = plate.dimensions.find((dimension) => dimension.type === "number" && (/体积|volume/i.test(dimension.name) || /^(nL|uL|µL|mL|L)$/i.test(dimension.unit || "")));
-      for (const wellId of nOrderWellIds(plate)) {
+      for (const wellId of exportOrderWellIds(plate)) {
         const params = wells[wellId]?.params || {};
         if (!Object.values(params).some((value) => value !== "" && value !== undefined)) continue;
         const volumeValue = volume && params[volume.id] !== undefined && params[volume.id] !== "" ? `${params[volume.id]}${volume.unit ? ` ${volume.unit}` : ""}` : "";

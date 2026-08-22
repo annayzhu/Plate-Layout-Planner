@@ -25,7 +25,13 @@ page.on("console", (message) => {
 
 try {
   await page.goto("http://127.0.0.1:4186/", { waitUntil: "networkidle" });
-  await page.evaluate(() => localStorage.clear());
+  await page.evaluate(async () => {
+    localStorage.clear();
+    await new Promise((resolve) => {
+      const request = indexedDB.deleteDatabase("plate-layout-studio");
+      request.onsuccess = request.onerror = request.onblocked = resolve;
+    });
+  });
   await page.reload({ waitUntil: "networkidle" });
 
   if (await page.locator(".well").count() !== 24) throw new Error("Initial plate did not render 24 wells.");
@@ -109,7 +115,10 @@ try {
   if (await page.locator('[data-liquid-action="print"]').count() !== 1) throw new Error("Liquid results do not expose a Print / PDF action.");
   await page.screenshot({ path: resolve(outputDirectory, "02-liquid-transfection.png"), fullPage: true });
   await page.locator('[data-liquid-action="save"]').click();
-  const savedLiquidPlans = await page.evaluate(() => JSON.parse(localStorage.getItem("plate-layout-studio:project:v1")).liquidPlans || []);
+  const savedLiquidPlans = await page.evaluate(() => {
+    const workspace = JSON.parse(localStorage.getItem("plate-layout-studio:workspace:v2"));
+    return workspace.plates.find((plate) => plate.id === workspace.activePlateId)?.liquidPlans || [];
+  });
   if (savedLiquidPlans.length !== 1 || savedLiquidPlans[0].module !== "transfection") throw new Error("Transfection recipe was not saved with the project.");
   if (await page.locator("[data-lipo-only]:visible").count()) throw new Error("Lipofectamine-only fields were visible in the RNAiMAX preset.");
 
@@ -662,10 +671,69 @@ try {
   if (await page.locator(".well").count() !== 6) throw new Error("Legacy JSON import did not restore the six-well plate.");
   const legacyA1Title = await page.locator('[data-well="A1"]').getAttribute("title");
   if (!legacyA1Title?.includes("Legacy-A")) throw new Error(`Legacy JSON import lost A1 data: ${legacyA1Title}`);
-  const legacyLiquidPlans = await page.evaluate(() => JSON.parse(localStorage.getItem("plate-layout-studio:project:v1")).liquidPlans);
+  const legacyLiquidPlans = await page.evaluate(() => {
+    const workspace = JSON.parse(localStorage.getItem("plate-layout-studio:workspace:v2"));
+    return workspace.plates.find((plate) => plate.id === workspace.activePlateId)?.liquidPlans;
+  });
   if (!Array.isArray(legacyLiquidPlans) || legacyLiquidPlans.length !== 0) throw new Error("Legacy JSON import did not normalize missing liquid plans.");
 
-  await page.evaluate(() => localStorage.clear());
+  await page.locator("#duplicatePlateButton").click();
+  if (await page.locator(".plate-tab").count() !== 2) throw new Error("Full plate duplication did not create a second physical plate.");
+  if (!(await page.locator('[data-well="A1"]').getAttribute("title"))?.includes("Legacy-A")) throw new Error("Full plate duplication did not copy well assignments.");
+  await page.locator("#projectName").fill("Legacy copy");
+  await page.locator("#projectName").blur();
+  await page.locator('[data-well="A1"]').click();
+  const multiPlateSampleRow = page.locator(".parameter-input-row").filter({ hasText: "样本" });
+  await multiPlateSampleRow.locator(".parameter-value").fill("Copy-A");
+  await page.locator("#applyParametersButton").click();
+  await page.locator(".plate-tab").first().click();
+  const originalPlateTitle = await page.locator('[data-well="A1"]').getAttribute("title");
+  if (!originalPlateTitle?.includes("Legacy-A") || originalPlateTitle.includes("Copy-A")) throw new Error(`Same-format plates contaminated each other: ${originalPlateTitle}`);
+
+  for (const plateIndex of [0, 1]) {
+    await page.locator(".plate-tab").nth(plateIndex).click();
+    await page.locator('.liquid-module-launch[data-liquid-module="basic"]').click();
+    await page.locator('#liquidActiveForm [name="calculationType"]').selectOption("dilution");
+    await page.locator('#liquidActiveForm button[type="submit"]').click();
+    await page.locator('[data-liquid-action="save"]').click();
+    await page.locator("#closeLiquidDrawerButton").click();
+  }
+  await page.locator("#projectLiquidScope").selectOption("all");
+  await page.locator("#projectLiquidOverage").fill("10");
+  await page.locator("#projectLiquidSummaryButton").click();
+  const liquidSummaryText = await page.locator("#projectLiquidSummary").innerText();
+  if (!liquidSummaryText.includes("已汇总 2 块板") || !liquidSummaryText.includes("Legacy project") || !liquidSummaryText.includes("Legacy copy")) throw new Error(`Cross-plate liquid summary did not merge the two saved plans: ${liquidSummaryText}`);
+
+  await page.locator("#overviewToggleButton").click();
+  if (await page.locator(".overview-plate").count() !== 2) throw new Error("Project overview did not show both physical plates.");
+  await page.screenshot({ path: resolve(outputDirectory, "07-multi-plate-overview.png"), fullPage: true });
+  await page.locator("#overviewToggleButton").click();
+
+  const xlsxDownloadPromise = page.waitForEvent("download");
+  await page.locator("#exportXlsxButton").click();
+  const xlsxDownload = await xlsxDownloadPromise;
+  if (!xlsxDownload.suggestedFilename().endsWith("_multi-plate.xlsx")) throw new Error(`Unexpected XLSX filename: ${xlsxDownload.suggestedFilename()}`);
+  const xlsxPath = await xlsxDownload.path();
+  const xlsxBytes = await readFile(xlsxPath);
+  if (xlsxBytes[0] !== 0x50 || xlsxBytes[1] !== 0x4b) throw new Error("Multi-plate export is not a real XLSX ZIP workbook.");
+  await page.locator("#importJsonInput").setInputFiles({ name: "roundtrip.xlsx", mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", buffer: xlsxBytes });
+  await page.locator("#confirmImportButton").click();
+  if (await page.locator(".plate-tab").count() !== 4) throw new Error("XLSX round-trip did not add exactly the two plate worksheets or failed to skip system sheets.");
+  await page.reload({ waitUntil: "networkidle" });
+  if (await page.locator(".plate-tab").count() !== 4) throw new Error("IndexedDB/local workspace persistence did not restore all plates after reload.");
+  await page.locator("#deletePlateButton").click();
+  await page.locator("#deletePlateButton").click();
+  if (await page.locator(".plate-tab").count() !== 3) throw new Error("Plate deletion did not remove the active plate.");
+  await page.locator("#undoButton").click();
+  if (await page.locator(".plate-tab").count() !== 4) throw new Error("Project-level undo did not restore the deleted plate.");
+
+  await page.evaluate(async () => {
+    localStorage.clear();
+    await new Promise((resolve) => {
+      const request = indexedDB.deleteDatabase("plate-layout-studio");
+      request.onsuccess = request.onerror = request.onblocked = resolve;
+    });
+  });
   await page.reload({ waitUntil: "networkidle" });
   await page.locator('.plate-option[data-size="12"]').click();
   await page.locator('.liquid-module-launch[data-liquid-module="transfection"]').click();
@@ -721,6 +789,8 @@ try {
     editablePlateName: "subtle dashed underline and text cursor expose inline editing without another button",
     interactionHelp: "selection instructions sit inside the plate visualization above the wells",
     spreadsheetImport: "Excel-compatible CSV created a 12-well plate with units and quoted values",
+    multiPlateWorkspace: "same-format plates stayed isolated; overview, duplication, deletion, project undo, persistence, and XLSX round-trip passed",
+    crossPlateLiquid: "two compatible saved plans merged before a single shared 10% overage and were included in XLSX",
     mobilePageWidth: pageWidths,
     languageSwitch: "Chinese and English persisted across reload",
     screenshots: outputDirectory,

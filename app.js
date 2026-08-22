@@ -10,8 +10,8 @@
   const LANGUAGE_KEY = "plate-layout-studio:language";
   const RECIPE_LIBRARY_KEY = "plate-layout-studio:liquid-recipes:v1";
   const BUILTIN_LIQUID_RECIPES = Object.freeze([
-    { id: "builtin-rnai", builtIn: true, module: "transfection", name: "RNAiMAX + siRNA", input: { preset: "rnai", direction: "reverse", finalVolume: "300", complexVolume: "30", stockConcentration: "10", stockUnit: "µM", targetValue: "10", targetUnit: "nM", reagentPerWell: "0.9", overagePercent: "10" } },
-    { id: "builtin-lipo3000", builtIn: true, module: "transfection", name: "Lipofectamine 3000 + plasmid", input: { preset: "lipo3000", direction: "forward", finalVolume: "2000", complexVolume: "250", stockConcentration: "500", stockUnit: "ng/µL", targetValue: "2500", targetUnit: "ng", reagentPerWell: "3.75", p3000PerUg: "2", overagePercent: "10" } },
+    { id: "builtin-rnai", builtIn: true, module: "transfection", name: "RNAiMAX + siRNA", input: { preset: "rnai", direction: "reverse", stockConcentration: "10", stockUnit: "µM", targetValue: "10", targetUnit: "nM", overagePercent: "10" } },
+    { id: "builtin-lipo3000", builtIn: true, module: "transfection", name: "Lipofectamine 3000 + plasmid", input: { preset: "lipo3000", direction: "forward", stockConcentration: "500", stockUnit: "ng/µL", targetValue: "2500", targetUnit: "ng", p3000PerUg: "2", overagePercent: "10" } },
     { id: "builtin-c1v1", builtIn: true, module: "basic", name: "C1V1 stock dilution", input: { calculationType: "dilution", kind: "molar", volumeMode: "total", overagePercent: "10" } },
   ]);
   const I18N = {
@@ -114,6 +114,7 @@
   let activeLiquidModule = "basic";
   let lastLiquidResult = null;
   let pendingDrugLayout = null;
+  let pendingSerialLayout = null;
   const liquidDrafts = Object.create(null);
 
   function applyLanguage() {
@@ -799,20 +800,25 @@
   function transfectionLiquidMarkup() {
     const wells = liquidTargetWellIds().length;
     const textDimensions = project.dimensions.filter((dimension) => dimension.type === "text");
+    const plateDefault = {
+      6: { finalVolume: 2000, complexVolume: 200, reagentPerWell: 6 },
+      24: { finalVolume: 300, complexVolume: 30, reagentPerWell: 0.9 },
+    }[project.plateSize] || { finalVolume: "", complexVolume: "", reagentPerWell: "" };
     return liquidWorkspace(
       bilingual("转染体系配液", "Transfection mix preparation"),
       bilingual("按当前孔数计算双管预混体系。预设参数是起始值，实验前应按细胞与厂商说明书复核。", "Calculate two-tube premixes for the current well scope. Preset values are starting points and must be reviewed for the cell model."),
       `<label class="wide"><span>${bilingual("试剂预设", "Reagent preset")}</span><select name="preset"><option value="rnai">RNAiMAX + siRNA</option><option value="lipo3000">Lipofectamine 3000 + plasmid</option><option value="lipo3000-combo">Lipofectamine 3000 + plasmid + siRNA</option><option value="custom-one">${bilingual("自定义单管", "Custom one-tube")}</option><option value="custom-two">${bilingual("自定义双管/多管", "Custom two/multi-tube")}</option></select></label>` +
+      `<label><span>${bilingual("切换板型后的处理", "After changing plate format")}</span><select name="platePresetAction"><option value="keep">${bilingual("保留当前配方", "Keep current recipe")}</option><option value="apply-default">${bilingual("应用该板型已知起始值", "Apply known format starting values")}</option><option value="recalculate">${bilingual("保留配方并按新孔数重算", "Keep recipe and recalculate for scope")}</option></select><small>${escapeHtml([6, 24].includes(project.plateSize) ? bilingual(`当前为 ${project.plateSize} 孔板，已有 RNAiMAX 起始值。`, `Known RNAiMAX starting values are available for ${project.plateSize}-well plates.`) : bilingual("该板型没有内置厂商起始值，不自动线性外推。", "No built-in manufacturer starting values exist for this format; values are not linearly extrapolated."))}</small></label>` +
       `<label class="liquid-scope-field"><span>${bilingual("孔数（来自当前孔板范围）", "Well count (from current plate scope)")}</span><input name="wellCount" type="number" min="1" step="1" value="${wells}" readonly aria-readonly="true"><small class="liquid-scope-help">${bilingual("如需修改孔数，请关闭窗口后重新选择孔位。", "To change the well count, close this panel and reselect wells.")}</small></label>` +
       `<label><span>${bilingual("分组维度（可选）", "Grouping dimension (optional)")}</span><select name="groupDimension"><option value="">${bilingual("不分组", "No grouping")}</option>${textDimensions.map((dimension) => `<option value="${escapeHtml(dimension.id)}">${escapeHtml(dimensionLabel(dimension))}</option>`).join("")}</select></label>` +
       `<label><span>${bilingual("转染方式", "Transfection direction")}</span><select name="direction"><option value="reverse">${bilingual("反向转染", "Reverse")}</option><option value="forward">${bilingual("正向转染", "Forward")}</option></select></label>` +
       `<label><span>${bilingual("合并公共 Master Mix", "Merge common master mix")}</span><select name="mergeCommonMix"><option value="off">${bilingual("不合并", "Keep separate")}</option><option value="on">${bilingual("条件一致时合并", "Merge identical components")}</option></select></label>` +
-      `<label><span>${bilingual("孔内终体积", "Final well volume")}</span><div class="liquid-inline-input"><input name="finalVolume" type="number" min="0" step="any" value="300"><select disabled><option>µL</option></select></div></label>` +
-      `<label><span>${bilingual("转染复合物体积", "Complex volume")}</span><div class="liquid-inline-input"><input name="complexVolume" type="number" min="0" step="any" value="30"><select disabled><option>µL</option></select></div></label>` +
+      `<label><span>${bilingual("孔内终体积", "Final well volume")}</span><div class="liquid-inline-input"><input name="finalVolume" type="number" min="0" step="any" value="${plateDefault.finalVolume}"><select disabled><option>µL</option></select></div></label>` +
+      `<label><span>${bilingual("转染复合物体积", "Complex volume")}</span><div class="liquid-inline-input"><input name="complexVolume" type="number" min="0" step="any" value="${plateDefault.complexVolume}"><select disabled><option>µL</option></select></div></label>` +
       `<label><span>${bilingual("目的物名称", "Cargo name")}</span><input name="cargoName" type="text" value="siRNA"></label>` +
       `<label><span>${bilingual("库存浓度", "Stock concentration")}</span><div class="liquid-inline-input"><input name="stockConcentration" type="number" min="0" step="any" value="10"><select name="stockUnit">${liquidUnitOptions(["nM","µM","mM"], "µM")}</select></div></label>` +
       `<label><span data-target-label>${bilingual("目标终浓度", "Target final concentration")}</span><div class="liquid-inline-input"><input name="targetValue" type="number" min="0" step="any" value="10"><select name="targetUnit">${liquidUnitOptions(["nM","µM"], "nM")}</select></div></label>` +
-      `<label><span data-reagent-label>RNAiMAX / well</span><div class="liquid-inline-input"><input name="reagentPerWell" type="number" min="0" step="any" value="0.9"><select disabled><option>µL</option></select></div></label>` +
+      `<label><span data-reagent-label>RNAiMAX / well</span><div class="liquid-inline-input"><input name="reagentPerWell" type="number" min="0" step="any" value="${plateDefault.reagentPerWell}"><select disabled><option>µL</option></select></div></label>` +
       `<label data-lipo-only hidden><span>P3000 / µg DNA</span><div class="liquid-inline-input"><input name="p3000PerUg" type="number" min="0" step="any" value="2"><select disabled><option>µL</option></select></div></label>` +
       `<label data-lipo-only hidden><span>${bilingual("质粒长度（可选）", "Plasmid length (optional)")}</span><div class="liquid-inline-input"><input name="lengthBp" type="number" min="1" step="1" placeholder="5000"><select disabled><option>bp</option></select></div></label>` +
       `<label><span>${bilingual("余量", "Overage")}</span><div class="liquid-inline-input"><input name="overagePercent" type="number" min="0" step="any" value="10"><select disabled><option>%</option></select></div></label>` +
@@ -820,9 +826,12 @@
       `<label><span>${bilingual("中间工作液", "Intermediate working solution")}</span><select name="workingSolutionMode"><option value="suggest">${bilingual("仅建议，不改变计算", "Suggest only")}</option><option value="apply">${bilingual("确认并应用建议", "Confirm and apply")}</option></select></label>` +
       `<label class="wide"><span>${bilingual("分组角色（可选；每行 组名=角色）", "Group roles (optional; Group=Role per line)")}</span><textarea name="groupRoleLines" rows="3" placeholder="Mock=Mock&#10;Untreated=Untransfected&#10;Blank=Exclude"></textarea></label>` +
       `<label class="wide"><span>${bilingual("分组余量覆盖（可选；每行 组名=百分比）", "Group overage overrides (optional; Group=percent per line)")}</span><textarea name="groupOverageLines" rows="2" placeholder="Control=10&#10;Treatment=15"></textarea></label>` +
-      `<label class="wide" data-custom-only hidden><span>${bilingual("目的物：名称,类型,库存,库存单位,目标模式,目标值,目标单位,长度bp", "Cargo: name,type,stock,stock unit,target mode,target,target unit,length bp")}</span><textarea name="cargoLines" rows="4">Plasmid DNA,plasmid,500,ng/µL,mass-per-well,2500,ng,5000&#10;siRNA,siRNA,10,µM,final-concentration,10,nM,</textarea></label>` +
-      `<label class="wide" data-custom-only hidden><span>${bilingual("预混管：管名,每孔管体积,组分,模式,数值,关联目的物,可稀释", "Premix tubes: tube,volume/well,component,mode,value,cargo reference,dilutable")}</span><textarea name="tubeLines" rows="6">A,125,Plasmid DNA,cargo,,Plasmid DNA,yes&#10;A,125,siRNA,cargo,,siRNA,yes&#10;A,125,P3000,ratio-per-ug,2,Plasmid DNA,no&#10;A,125,Opti-MEM,diluent,,,yes&#10;B,125,Lipofectamine 3000,fixed,3.75,,no&#10;B,125,Opti-MEM,diluent,,,yes</textarea></label>` +
-      `<div class="liquid-subsection"><strong>${bilingual("优化梯度", "Optimization gradient")}</strong><label><span>${bilingual("默认关闭；开启后本版仅保留配置，不自动合并 Master Mix", "Off by default; variants are kept separate and never auto-merged")}</span><select name="optimizationEnabled"><option value="off">${bilingual("关闭", "Off")}</option><option value="on">${bilingual("开启", "On")}</option></select></label></div>`,
+      `<label data-custom-only hidden><span>${bilingual("混合目的物总质量", "Total cargo mixture mass")}</span><div class="liquid-inline-input"><input name="totalCargoMass" type="number" min="0" step="any" value="600"><select name="totalCargoMassUnit">${liquidUnitOptions(["ng","µg"], "ng")}</select></div></label>` +
+      `<label data-custom-only hidden><span>${bilingual("混合目的物总摩尔量", "Total cargo mixture amount")}</span><div class="liquid-inline-input"><input name="totalCargoAmount" type="number" min="0" step="any" value="10"><select name="totalCargoAmountUnit">${liquidUnitOptions(["pmol","nmol"], "pmol")}</select></div></label>` +
+      `<label class="wide" data-custom-only hidden><span>${bilingual("目的物：名称,类型(siRNA/plasmid/other),库存,库存单位,目标模式,目标值/比例,目标单位,长度bp,分子量", "Cargo: name,type(siRNA/plasmid/other),stock,stock unit,target mode,target/ratio,target unit,length bp,molecular weight")}</span><textarea name="cargoLines" rows="4">Plasmid DNA,plasmid,500,ng/µL,mass-per-well,2500,ng,5000,&#10;siRNA,siRNA,10,µM,final-concentration,10,nM,,</textarea></label>` +
+      `<label class="wide" data-custom-only hidden><span>${bilingual("分组目的物覆盖（每行：组名|完整目的物行）", "Group-specific cargo override (Group|complete cargo row)")}</span><textarea name="groupCargoLines" rows="3" placeholder="Treatment A|siA,siRNA,10,µM,final-concentration,10,nM,,&#10;Treatment B|siB,siRNA,10,µM,final-concentration,20,nM,,"></textarea></label>` +
+      `<label class="wide" data-custom-only hidden><span>${bilingual("预混管：管名,每孔管体积,组分,模式,数值,关联目的物/集合,可稀释", "Premix tubes: tube,volume/well,component,mode,value,cargo/collection,dilutable")}</span><textarea name="tubeLines" rows="6">A,125,Plasmid DNA,cargo,,Plasmid DNA,yes&#10;A,125,siRNA,cargo,,siRNA,yes&#10;A,125,P3000,ratio-per-ug,2,Plasmid DNA,no&#10;A,125,Opti-MEM,diluent,,,yes&#10;B,125,Lipofectamine 3000,fixed,3.75,,no&#10;B,125,Opti-MEM,diluent,,,yes</textarea><small>${escapeHtml(bilingual("集合可用 all-cargos、all-siRNA、all-plasmid，或用 A+B 指定目的物子集；模式可用 cargo、fixed、ratio-per-ug、ratio-per-pmol、ratio-volume、diluent。", "Collections: all-cargos, all-siRNA, all-plasmid, or a named subset such as A+B. Modes: cargo, fixed, ratio-per-ug, ratio-per-pmol, ratio-volume, diluent."))}</small></label>` +
+      `<div class="liquid-subsection"><strong>${bilingual("优化梯度", "Optimization gradient")}</strong><label><span>${bilingual("默认关闭；开启后各变体分别计算且不合并 Master Mix", "Off by default; enabled variants are calculated separately and never merged")}</span><select name="optimizationEnabled"><option value="off">${bilingual("关闭", "Off")}</option><option value="on">${bilingual("开启", "On")}</option></select></label><label data-optimization-only hidden><span>${bilingual("变体：名称,目的物倍数,试剂倍数", "Variants: name,cargo factor,reagent factor")}</span><textarea name="optimizationLines" rows="3">Low,0.5,0.75&#10;Standard,1,1&#10;High,2,1.5</textarea></label></div>`,
       bilingual("输出每孔配方、每管 Master Mix、总消耗量、操作 checklist 和小体积警告。", "Returns per-well recipes, tube-level master mixes, total consumption, checklist, and small-volume warnings."),
     );
   }
@@ -841,7 +850,9 @@
       `<label data-range-only hidden><span>${bilingual("范围刻度", "Range scale")}</span><select name="scale"><option value="log">Log</option><option value="linear">Linear</option></select></label>` +
       `<label><span>${bilingual("每级目标体积", "Volume per level")}</span><div class="liquid-inline-input"><input name="volumePerLevel" type="number" min="0" step="any" value="1000"><select name="volumeUnit">${liquidUnitOptions(["µL","mL"], "µL")}</select></div></label>` +
       `<label><span>${bilingual("余量", "Overage")}</span><div class="liquid-inline-input"><input name="overagePercent" type="number" min="0" step="any" value="10"><select disabled><option>%</option></select></div></label>` +
-      `<label><span>${bilingual("最小可靠移液体积", "Minimum pipetting volume")}</span><div class="liquid-inline-input"><input name="minimumPipetteVolume" type="number" min="0" step="any" value="1"><select disabled><option>µL</option></select></div></label>`,
+      `<label><span>${bilingual("最小可靠移液体积", "Minimum pipetting volume")}</span><div class="liquid-inline-input"><input name="minimumPipetteVolume" type="number" min="0" step="any" value="1"><select disabled><option>µL</option></select></div></label>` +
+      `<label><span>${bilingual("映射到孔板", "Map series to plate")}</span><select name="mapToPlate"><option value="off">${bilingual("仅计算配液", "Preparation only")}</option><option value="on">${bilingual("生成排板预览", "Create layout preview")}</option></select></label>` +
+      `<label><span>${bilingual("每个浓度复孔数", "Replicates per concentration")}</span><input name="replicates" type="number" min="1" step="1" value="1"></label>`,
       bilingual("输出每一级的来源、转移体积、稀释液体积和分步操作。", "Returns the source, transfer volume, diluent volume, and stepwise instructions for every level."),
     );
   }
@@ -859,8 +870,10 @@
       `<label><span>${bilingual("余量", "Overage")}</span><div class="liquid-inline-input"><input name="overagePercent" type="number" min="0" step="any" value="10"><select disabled><option>%</option></select></div></label>` +
       `<label><span>${bilingual("复孔分散", "Disperse replicates")}</span><select name="disperseReplicates"><option value="off">${bilingual("关闭", "Off")}</option><option value="on">${bilingual("开启", "On")}</option></select></label>` +
       `<label><span>${bilingual("避开边缘孔", "Avoid edge wells")}</span><select name="avoidEdges"><option value="off">${bilingual("关闭", "Off")}</option><option value="on">${bilingual("开启", "On")}</option></select></label>` +
+      `<label><span>${bilingual("边缘孔填充", "Edge-well fill")}</span><select name="edgeFill"><option value="off">${bilingual("不写入", "Do not assign")}</option><option value="PBS">PBS</option><option value="Medium">${bilingual("培养基", "Medium")}</option></select></label>` +
       `<label><span>${bilingual("每种药物 vehicle 对照孔", "Vehicle controls per drug")}</span><input name="controlsPerDrug" type="number" min="0" step="1" value="0"></label>` +
-      `<label><span>${bilingual("对照位置", "Control position")}</span><select name="controlPosition"><option value="end">${bilingual("末端", "End")}</option><option value="start">${bilingual("起始", "Start")}</option></select></label>` +
+      `<label><span>${bilingual("对照位置", "Control position")}</span><select name="controlPosition"><option value="end">${bilingual("末端", "End")}</option><option value="start">${bilingual("起始", "Start")}</option><option value="fixed">${bilingual("指定孔位", "Fixed wells")}</option></select></label>` +
+      `<label class="wide"><span>${bilingual("指定 vehicle 对照孔（逗号或空格分隔）", "Fixed vehicle-control wells (comma/space separated)")}</span><input name="fixedControlWells" type="text" placeholder="B2, B3"></label>` +
       `<div class="liquid-subsection"><strong>${bilingual("范围与安全", "Scope and safety")}</strong><span>${escapeHtml(bilingual("优先使用当前选中孔；未选孔时使用当前板的空白孔。已有内容的孔不会被覆盖。计算后必须先预览，再确认写入。", "Selected wells are preferred; otherwise empty wells on the current plate are used. Populated wells are never overwritten. Preview is required before writing."))}</span></div>`,
       bilingual("输出每种药物的独立配液表和孔板预览；确认后写入药物、浓度和复孔字段。", "Returns independent preparation tables and a plate preview; confirmation writes drug, concentration, and replicate fields."),
     );
@@ -904,6 +917,7 @@
         if (control.options && ![...control.options].some((option) => option.value === value)) continue;
         control.value = value;
       }
+      if (module === "transfection") updateTransfectionFormControls(form);
     }
     const scopeCount = liquidTargetWellIds().length;
     form.querySelectorAll('[name="wellCount"]').forEach((control) => {
@@ -916,7 +930,7 @@
   function liquidModuleDefinition(module) {
     return {
       basic: { markup: basicLiquidMarkup, updateNames: ["calculationType", "kind", "volumeMode"], update: updateBasicFormControls, calculate: calculateBasicLiquid },
-      transfection: { markup: transfectionLiquidMarkup, updateNames: ["preset"], update: updateTransfectionFormControls, calculate: calculateTransfectionLiquid },
+      transfection: { markup: transfectionLiquidMarkup, updateNames: ["preset", "optimizationEnabled", "platePresetAction"], update: updateTransfectionFormControls, calculate: calculateTransfectionLiquid },
       serial: { markup: serialLiquidMarkup, updateNames: ["method"], update: updateSerialFormControls, calculate: calculateSerialLiquid },
       drug: { markup: drugLiquidMarkup, updateNames: [], update: null, calculate: calculateDrugLiquid },
     }[module];
@@ -927,6 +941,7 @@
     activeLiquidModule = ["basic", "transfection", "serial", "drug"].includes(module) ? module : "basic";
     lastLiquidResult = null;
     pendingDrugLayout = null;
+    pendingSerialLayout = null;
     document.querySelectorAll("[data-liquid-module]").forEach((button) => button.classList.toggle("active", button.dataset.liquidModule === activeLiquidModule));
     const markup = liquidModuleDefinition(activeLiquidModule).markup();
     elements.liquidDrawerContent.innerHTML = markup;
@@ -948,7 +963,7 @@
   }
 
   function liquidResultActions() {
-    return `<div class="liquid-action-row"><button class="secondary-button" data-liquid-action="copy" type="button">${bilingual("复制表格", "Copy table")}</button><button class="secondary-button" data-liquid-action="csv" type="button">CSV</button><button class="secondary-button" data-liquid-action="save" type="button">${bilingual("保存到项目", "Save to project")}</button><button class="secondary-button" data-liquid-action="save-preset" type="button">${bilingual("存为可复用预设", "Save reusable preset")}</button></div>`;
+    return `<div class="liquid-action-row"><button class="secondary-button" data-liquid-action="copy" type="button">${bilingual("复制表格", "Copy table")}</button><button class="secondary-button" data-liquid-action="csv" type="button">CSV</button><button class="secondary-button" data-liquid-action="print" type="button">${bilingual("打印 / PDF", "Print / PDF")}</button><button class="secondary-button" data-liquid-action="save" type="button">${bilingual("保存到项目", "Save to project")}</button><button class="secondary-button" data-liquid-action="save-preset" type="button">${bilingual("存为可复用预设", "Save reusable preset")}</button></div>`;
   }
 
   function renderLiquidResult(result) {
@@ -962,7 +977,9 @@
     const warnings = result.warnings?.length ? `<div class="liquid-warning-list">${result.warnings.map((warning) => `<div class="liquid-warning">${escapeHtml(warning)}</div>`).join("")}</div>` : "";
     const checklist = result.checklist?.length ? `<ol class="liquid-checklist">${result.checklist.map((step) => `<li>${escapeHtml(step)}</li>`).join("")}</ol>` : "";
     const layout = result.layout?.length ? liquidLayoutPreview(result.layout) : "";
-    host.innerHTML = header + table + warnings + checklist + layout + liquidResultActions() + (result.canApplyLayout ? `<div class="liquid-action-row"><button class="primary-button" data-liquid-action="apply-layout" type="button">${bilingual("确认写入孔板", "Confirm plate write")}</button></div>` : "");
+    const applyAction = result.applyAction || "apply-layout";
+    const applyLabel = result.applyLabel || bilingual("确认写入孔板", "Confirm plate write");
+    host.innerHTML = header + table + warnings + checklist + layout + liquidResultActions() + (result.canApplyLayout ? `<div class="liquid-action-row"><button class="primary-button" data-liquid-action="${escapeHtml(applyAction)}" type="button">${escapeHtml(applyLabel)}</button></div>` : "");
   }
 
   function liquidLayoutPreview(assignments) {
@@ -1024,50 +1041,79 @@
 
   function parseGroupRoles(text) {
     const roles = new Map();
-    String(text || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean).forEach((line) => {
-      const [name, role] = line.split("=").map((part) => part.trim());
-      if (name && ["Experimental", "Mock", "Untransfected", "Exclude"].includes(role)) roles.set(name, role);
+    String(text || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean).forEach((line, index) => {
+      const parts = line.split("=").map((part) => part.trim());
+      const [name, role] = parts;
+      if (parts.length !== 2 || !name || !["Transfection", "Experimental", "Mock", "Untransfected", "Exclude"].includes(role)) throw new Error(bilingual(`分组角色第 ${index + 1} 行无效；请使用“组名=Transfection/Mock/Untransfected/Exclude”。`, `Group role line ${index + 1} is invalid; use Group=Transfection/Mock/Untransfected/Exclude.`));
+      roles.set(name, role === "Experimental" ? "Transfection" : role);
     });
     return roles;
   }
 
   function parseGroupOverages(text) {
     const overages = new Map();
-    String(text || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean).forEach((line) => {
-      const [name, percent] = line.split("=").map((part) => part.trim());
-      if (name && Number.isFinite(Number(percent)) && Number(percent) >= 0) overages.set(name, Number(percent));
+    String(text || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean).forEach((line, index) => {
+      const parts = line.split("=").map((part) => part.trim());
+      const [name, percent] = parts;
+      if (parts.length !== 2 || !name || !Number.isFinite(Number(percent)) || Number(percent) < 0) throw new Error(bilingual(`分组余量第 ${index + 1} 行无效；请使用“组名=非负百分比”。`, `Group overage line ${index + 1} is invalid; use Group=non-negative percent.`));
+      overages.set(name, Number(percent));
     });
     return overages;
   }
 
   function parseTransfectionCargos(text) {
     return String(text || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean).map((line, index) => {
-      const [name, type, stockConcentration, stockUnit, targetMode, targetValue, targetUnit, lengthBp] = line.split(/[,，\t]/).map((value) => value.trim());
-      if (!name || !["siRNA", "plasmid"].includes(type)) throw new Error(bilingual(`目的物第 ${index + 1} 行格式无效。`, `Cargo line ${index + 1} is invalid.`));
-      return { name, type, stockConcentration, stockUnit, targetMode, targetValue, targetUnit, lengthBp: lengthBp || undefined };
+      const [name, type, stockConcentration, stockUnit, targetMode, targetValue, targetUnit, lengthBp, molecularWeight] = line.split(/[,，\t]/).map((value) => value.trim());
+      if (!name || !["siRNA", "plasmid", "other"].includes(type)) throw new Error(bilingual(`目的物第 ${index + 1} 行格式无效。`, `Cargo line ${index + 1} is invalid.`));
+      return { name, type, stockConcentration, stockUnit, targetMode, targetValue, targetUnit, lengthBp: lengthBp || undefined, molecularWeight: molecularWeight || undefined };
     });
+  }
+
+  function parseGroupCargoOverrides(text) {
+    const rows = new Map();
+    String(text || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean).forEach((line, index) => {
+      const divider = line.indexOf("|");
+      if (divider < 1) throw new Error(bilingual(`分组目的物第 ${index + 1} 行缺少“组名|”。`, `Group cargo line ${index + 1} needs “Group|”.`));
+      const group = line.slice(0, divider).trim();
+      const cargoLine = line.slice(divider + 1).trim();
+      if (!rows.has(group)) rows.set(group, []);
+      rows.get(group).push(cargoLine);
+    });
+    return new Map([...rows].map(([group, lines]) => [group, lines.join("\n")]));
   }
 
   function parseTransfectionTubes(text) {
     const tubes = new Map();
     String(text || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean).forEach((line, index) => {
       const [tubeName, volumePerWell, componentName, mode, value, cargoName, dilutable] = line.split(/[,，\t]/).map((part) => part.trim());
-      if (!tubeName || !componentName || !["cargo", "fixed", "ratio-per-ug", "diluent"].includes(mode)) throw new Error(bilingual(`预混管第 ${index + 1} 行格式无效。`, `Premix line ${index + 1} is invalid.`));
+      if (!tubeName || !componentName || !["cargo", "fixed", "ratio-per-ug", "ratio-per-pmol", "ratio-volume", "diluent"].includes(mode)) throw new Error(bilingual(`预混管第 ${index + 1} 行格式无效。`, `Premix line ${index + 1} is invalid.`));
       if (!tubes.has(tubeName)) tubes.set(tubeName, { name: tubeName, volumePerWell, components: [] });
       const component = { kind: mode, name: componentName, dilutionAllowed: dilutable !== "no" };
       if (mode === "cargo") component.cargoName = cargoName || componentName;
       if (mode === "fixed") component.volumePerWell = value;
-      if (mode === "ratio-per-ug") { component.ratio = value; component.cargoName = cargoName; }
+      if (["ratio-per-ug", "ratio-per-pmol", "ratio-volume"].includes(mode)) { component.ratio = value; component.cargoName = cargoName; }
       tubes.get(tubeName).components.push(component);
     });
     return [...tubes.values()];
   }
 
-  function transfectionDefinition(values, mock = false) {
+  function parseOptimizationVariants(values) {
+    if (values.optimizationEnabled !== "on") return [{ name: "", cargoFactor: 1, reagentFactor: 1 }];
+    const variants = String(values.optimizationLines || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean).map((line, index) => {
+      const [name, cargoFactor, reagentFactor] = line.split(/[,，\t]/).map((part) => part.trim());
+      if (!name || !(Number(cargoFactor) > 0) || !(Number(reagentFactor) > 0)) throw new Error(bilingual(`优化变体第 ${index + 1} 行格式无效。`, `Optimization variant ${index + 1} is invalid.`));
+      return { name, cargoFactor: Number(cargoFactor), reagentFactor: Number(reagentFactor) };
+    });
+    if (!variants.length) throw new Error(bilingual("开启优化梯度后至少需要一个变体。", "At least one optimization variant is required when optimization is enabled."));
+    return variants;
+  }
+
+  function transfectionDefinition(values, mock = false, groupName = "", variant = { cargoFactor: 1, reagentFactor: 1 }) {
     let cargos;
     let tubes;
     if (["lipo3000-combo", "custom-one", "custom-two"].includes(values.preset)) {
-      cargos = parseTransfectionCargos(values.cargoLines);
+      const groupCargoText = parseGroupCargoOverrides(values.groupCargoLines).get(groupName);
+      cargos = parseTransfectionCargos(groupCargoText || values.cargoLines);
       tubes = parseTransfectionTubes(values.tubeLines);
     } else if (values.preset === "lipo3000") {
       cargos = [{ name: values.cargoName, type: "plasmid", stockConcentration: values.stockConcentration, stockUnit: values.stockUnit, targetMode: "mass-per-well", targetValue: values.targetValue, targetUnit: values.targetUnit, lengthBp: values.lengthBp || undefined }];
@@ -1082,10 +1128,19 @@
         { name: "B", volumePerWell: Number(values.complexVolume) / 2, components: [{ kind: "fixed", name: "RNAiMAX", volumePerWell: values.reagentPerWell, dilutionAllowed: false }, { kind: "diluent", name: "Opti-MEM" }] },
       ];
     }
+    cargos = cargos.map((cargo) => ({
+      ...cargo,
+      targetValue: ["mass-ratio", "molar-ratio"].includes(cargo.targetMode) ? cargo.targetValue : Number(cargo.targetValue) * variant.cargoFactor,
+    }));
+    tubes = tubes.map((tube) => ({
+      ...tube,
+      components: tube.components.map((component) => ["fixed", "ratio-per-ug", "ratio-per-pmol", "ratio-volume"].includes(component.kind)
+        ? { ...component, ...(component.kind === "fixed" ? { volumePerWell: Number(component.volumePerWell) * variant.reagentFactor } : { ratio: Number(component.ratio) * variant.reagentFactor }) }
+        : { ...component }),
+    }));
     if (mock) {
-      const cargoNames = new Set(cargos.map((cargo) => cargo.name));
       cargos = [];
-      tubes = tubes.map((tube) => ({ ...tube, components: tube.components.filter((component) => component.kind !== "cargo" && !(component.kind === "ratio-per-ug" && cargoNames.has(component.cargoName))) }));
+      tubes = tubes.map((tube) => ({ ...tube, components: tube.components.filter((component) => !["cargo", "ratio-per-ug", "ratio-per-pmol", "ratio-volume"].includes(component.kind)) }));
     }
     return { cargos, tubes };
   }
@@ -1094,27 +1149,29 @@
     const groups = transfectionGroups(values);
     const roles = parseGroupRoles(values.groupRoleLines);
     const groupOverages = parseGroupOverages(values.groupOverageLines);
+    const variants = parseOptimizationVariants(values);
     const rows = [];
     const warnings = [];
     const meta = [];
     const groupResults = [];
     for (const group of groups) {
-      const role = roles.get(group.name) || "Experimental";
+      const role = roles.get(group.name) || "Transfection";
       if (["Untransfected", "Exclude"].includes(role)) {
         meta.push(`${group.name}: ${role} · ${group.count} ${bilingual("孔不配转染液", "wells excluded from mix")}`);
         continue;
       }
-      const definition = transfectionDefinition(values, role === "Mock");
-      const result = Liquid.calculateGenericTransfection({ wellCount: group.count, overagePercent: groupOverages.get(group.name) ?? values.overagePercent, finalVolume: values.finalVolume, complexVolume: values.complexVolume, minimumPipetteVolume: values.minimumPipetteVolume, applyWorkingSolutions: values.workingSolutionMode === "apply", direction: values.direction, preset: values.preset, ...definition });
-      groupResults.push({ group, role, result });
-      meta.push(`${group.name}: ${role} · ${group.count} ${bilingual("孔", "wells")} → ${result.equivalents} ${bilingual("孔当量", "well equivalents")}`);
-      result.warnings.forEach((warning) => warnings.push(bilingual(`${group.name}：${warning.component} 实际移取 ${liquidNumber(warning.volumeUL)} µL，低于 ${values.minimumPipetteVolume} µL。${warning.dilutionAllowed ? "可考虑中间工作液。" : "仅提示，不自动稀释该试剂。"}`, `${group.name}: ${warning.component} transfer ${liquidNumber(warning.volumeUL)} µL is below ${values.minimumPipetteVolume} µL. ${warning.dilutionAllowed ? "Consider an intermediate working solution." : "Warning only; do not auto-dilute this reagent."}`)));
-      result.workingSolutions.forEach((working) => warnings.push(bilingual(`${group.name}：${working.component} 建议 ${working.dilutionFactor}× 中间工作液（${working.applied ? "已确认应用" : "尚未应用"}）。`, `${group.name}: ${working.dilutionFactor}× working solution proposed for ${working.component} (${working.applied ? "confirmed and applied" : "not applied"}).`)));
+      for (const variant of variants) {
+        const displayGroup = variant.name ? { ...group, name: `${group.name} · ${variant.name}` } : group;
+        const definition = transfectionDefinition(values, role === "Mock", group.name, variant);
+        const result = Liquid.calculateGenericTransfection({ wellCount: group.count, overagePercent: groupOverages.get(group.name) ?? values.overagePercent, finalVolume: values.finalVolume, complexVolume: values.complexVolume, minimumPipetteVolume: values.minimumPipetteVolume, applyWorkingSolutions: values.workingSolutionMode === "apply", direction: values.direction, preset: values.preset, totalCargoMass: Number(values.totalCargoMass || 0) * variant.cargoFactor, totalCargoMassUnit: values.totalCargoMassUnit, totalCargoAmount: Number(values.totalCargoAmount || 0) * variant.cargoFactor, totalCargoAmountUnit: values.totalCargoAmountUnit, ...definition });
+        groupResults.push({ group: displayGroup, role, result });
+        meta.push(`${displayGroup.name}: ${role} · ${group.count} ${bilingual("孔", "wells")} → ${result.equivalents} ${bilingual("孔当量", "well equivalents")}`);
+        result.warnings.forEach((warning) => warnings.push(bilingual(`${displayGroup.name}：${warning.component} 实际移取 ${liquidNumber(warning.volumeUL)} µL，低于 ${values.minimumPipetteVolume} µL。${warning.dilutionAllowed ? "可考虑中间工作液。" : "仅提示，不自动稀释该试剂。"}`, `${displayGroup.name}: ${warning.component} transfer ${liquidNumber(warning.volumeUL)} µL is below ${values.minimumPipetteVolume} µL. ${warning.dilutionAllowed ? "Consider an intermediate working solution." : "Warning only; do not auto-dilute this reagent."}`)));
+        result.workingSolutions.forEach((working) => warnings.push(bilingual(`${displayGroup.name}：${working.component} 建议 ${working.dilutionFactor}× 中间工作液（${working.applied ? "已确认应用" : "尚未应用"}）。`, `${displayGroup.name}: ${working.dilutionFactor}× working solution proposed for ${working.component} (${working.applied ? "confirmed and applied" : "not applied"}).`)));
+      }
     }
-    const cargoNames = new Set(groupResults.flatMap(({ result }) => result.cargos.map((cargo) => cargo.name)));
-    if (values.mergeCommonMix === "on" && groupResults.length > 1) {
-      const firstRows = groupResults[0].result.totals;
-      const commonKeys = firstRows.filter((row) => !cargoNames.has(row.component) && groupResults.every(({ result }) => result.totals.some((candidate) => candidate.tube === row.tube && candidate.component === row.component && candidate.volumeUL === row.volumeUL))).map((row) => `${row.tube}\u0000${row.component}`);
+    if (values.mergeCommonMix === "on" && values.optimizationEnabled !== "on" && groupResults.length > 1) {
+      const commonKeys = Liquid.commonTransfectionComponents(groupResults.map(({ result }) => result));
       for (const key of commonKeys) {
         const [tube, component] = key.split("\u0000");
         const matching = groupResults.map(({ result }) => result.totals.find((row) => row.tube === tube && row.component === component));
@@ -1124,7 +1181,7 @@
     } else {
       groupResults.forEach(({ group, result }) => result.totals.forEach((row) => rows.push([group.name, row.tube, row.component, `${liquidNumber(row.volumeUL)} µL`, `${liquidNumber(row.totalVolumeUL)} µL`])));
     }
-    if (values.optimizationEnabled === "on") warnings.push(bilingual("优化梯度已开启：不同变体必须分别配制，不自动合并 Master Mix。", "Optimization is enabled: variants must be prepared separately and are not auto-merged."));
+    if (values.optimizationEnabled === "on") warnings.push(bilingual(`优化梯度已开启：已生成 ${variants.length} 个独立变体，不自动合并 Master Mix。`, `Optimization is enabled: ${variants.length} independent variants were generated and were not merged.`));
     const checklist = values.preset === "rnai"
       ? [bilingual("A 管加入 siRNA 与 Opti-MEM。", "Combine siRNA and Opti-MEM in tube A."), bilingual("B 管加入 RNAiMAX 与 Opti-MEM。", "Combine RNAiMAX and Opti-MEM in tube B."), bilingual("混合 A、B 管，室温孵育 5 min。", "Combine tubes A and B and incubate for 5 min at room temperature."), values.direction === "forward" ? bilingual("将复合物加入已贴壁细胞。", "Add complexes to attached cells.") : bilingual("将复合物加入孔内，再加入细胞悬液。", "Add complexes to the wells, then add the cell suspension.")]
       : values.preset === "lipo3000"
@@ -1141,14 +1198,29 @@
   function calculateSerialLiquid(values) {
     const concentrations = Liquid.generateConcentrationSeries(values);
     const result = Liquid.calculateGradientPreparation({ ...values, concentrations });
+    const direct = Liquid.calculateGradientPreparation({ ...values, concentrations, strategy: "direct" });
+    const serial = Liquid.calculateGradientPreparation({ ...values, concentrations, strategy: "serial" });
     const minimum = Number(values.minimumPipetteVolume) || 1;
     const warnings = result.rows.filter((row) => row.transferVolumeUL > 0 && row.transferVolumeUL < minimum).map((row) => bilingual(`第 ${row.level} 级转移体积 ${liquidNumber(row.transferVolumeUL)} µL，低于 ${minimum} µL。`, `Level ${row.level} transfer ${liquidNumber(row.transferVolumeUL)} µL is below ${minimum} µL.`));
+    pendingSerialLayout = null;
+    if (values.mapToPlate === "on") {
+      const replicates = Math.max(1, Math.floor(Number(values.replicates) || 1));
+      const requested = concentrations.flatMap((concentration, level) => Array.from({ length: replicates }, (_, index) => ({ drug: bilingual("浓度梯度", "Concentration series"), concentration, replicate: index + 1, level: level + 1, controlType: "gradient" })));
+      const allIds = Core.makeWellIds(project.plateSize);
+      const scoped = selection.size ? [...selection] : allIds;
+      const candidates = scoped.filter((wellId) => !currentWells()[wellId] || !Object.keys(currentWells()[wellId].params || {}).length);
+      const occupiedCount = scoped.length - candidates.length;
+      if (occupiedCount) warnings.push(bilingual(`已从预览中排除 ${occupiedCount} 个已有内容的孔。`, `${occupiedCount} populated wells were excluded from the preview.`));
+      if (requested.length > candidates.length) warnings.push(bilingual(`排板需要 ${requested.length} 个孔，当前仅有 ${candidates.length} 个可用孔。`, `Layout needs ${requested.length} wells but only ${candidates.length} are available.`));
+      else pendingSerialLayout = requested.map((item, index) => ({ wellId: candidates[index], ...item }));
+    }
     renderLiquidResult({
       module: "serial", input: values,
-      meta: [bilingual(`${concentrations.length} 个浓度点`, `${concentrations.length} concentrations`), result.strategy === "serial" ? bilingual("逐级稀释", "Stepwise serial") : bilingual("直接配液", "Direct preparation")],
+      meta: [bilingual(`${concentrations.length} 个浓度点`, `${concentrations.length} concentrations`), result.strategy === "serial" ? bilingual("逐级稀释", "Stepwise serial") : bilingual("直接配液", "Direct preparation"), bilingual(`母液消耗比较：直接 ${liquidNumber(direct.stockConsumptionUL)} µL；逐级 ${liquidNumber(serial.stockConsumptionUL)} µL`, `Stock-use comparison: direct ${liquidNumber(direct.stockConsumptionUL)} µL; serial ${liquidNumber(serial.stockConsumptionUL)} µL`)],
       headers: [bilingual("级别", "Level"), bilingual("目标浓度", "Target concentration"), bilingual("来源", "Source"), bilingual("转移体积", "Transfer"), bilingual("稀释液", "Diluent"), bilingual("本级配制总量", "Prepared at this level"), bilingual("最终保留", "Final retained")],
       rows: result.rows.map((row) => [row.level, liquidNumber(row.concentration, 8), row.source === "stock" ? bilingual("母液", "Stock") : row.source, `${liquidNumber(row.transferVolumeUL)} µL`, `${liquidNumber(row.diluentVolumeUL)} µL`, `${liquidNumber(row.totalVolumeUL)} µL`, `${liquidNumber(row.retainedVolumeUL ?? row.totalVolumeUL)} µL`]), warnings,
       checklist: result.rows.map((row) => bilingual(`第 ${row.level} 级：从${row.source === "stock" ? "母液" : `第 ${row.level - 1} 级`}移取 ${liquidNumber(row.transferVolumeUL)} µL，加入 ${liquidNumber(row.diluentVolumeUL)} µL 稀释液；${row.downstreamTransferUL ? `再向下一级转移 ${liquidNumber(row.downstreamTransferUL)} µL，` : ""}最终保留 ${liquidNumber(row.retainedVolumeUL ?? row.totalVolumeUL)} µL。`, `Level ${row.level}: transfer ${liquidNumber(row.transferVolumeUL)} µL from ${row.source === "stock" ? "stock" : `level ${row.level - 1}`} and add ${liquidNumber(row.diluentVolumeUL)} µL diluent; ${row.downstreamTransferUL ? `transfer ${liquidNumber(row.downstreamTransferUL)} µL to the next level, then ` : ""}retain ${liquidNumber(row.retainedVolumeUL ?? row.totalVolumeUL)} µL.`)),
+      layout: pendingSerialLayout || [], canApplyLayout: Boolean(pendingSerialLayout), applyAction: "apply-serial-layout", applyLabel: bilingual("确认写入浓度系列", "Confirm concentration layout"),
     });
   }
 
@@ -1171,7 +1243,8 @@
     const drugs = parseDrugLines(values.drugLines, values.direction, values.dosingVolume);
     const targetIds = selection.size ? [...selection] : Core.makeWellIds(project.plateSize);
     const occupied = targetIds.filter((wellId) => currentWells()[wellId] && Object.keys(currentWells()[wellId].params || {}).length);
-    const layout = Liquid.planDrugGradientLayout({ plateSize: project.plateSize, wellIds: targetIds, occupiedWellIds: occupied, orientation: values.orientation, drugs, disperseReplicates: values.disperseReplicates === "on", avoidEdges: values.avoidEdges === "on", controlsPerDrug: values.controlsPerDrug, controlPosition: values.controlPosition });
+    const fixedControlWellIds = String(values.fixedControlWells || "").split(/[\s,，;；]+/).map((value) => value.trim().toUpperCase()).filter(Boolean);
+    const layout = Liquid.planDrugGradientLayout({ plateSize: project.plateSize, wellIds: targetIds, occupiedWellIds: occupied, orientation: values.orientation, drugs, disperseReplicates: values.disperseReplicates === "on", avoidEdges: values.avoidEdges === "on", edgeFill: values.edgeFill, controlsPerDrug: values.controlsPerDrug, controlPosition: values.controlPosition, fixedControlWellIds });
     const rows = [];
     for (const drug of drugs) {
       const concentrations = Liquid.generateConcentrationSeries(drug);
@@ -1180,7 +1253,7 @@
     }
     const warnings = [];
     if (layout.error) warnings.push(bilingual(`孔位不足：需要 ${layout.required} 个可用孔，当前仅有 ${layout.available} 个；建议至少使用 ${layout.platesNeeded} 块同规格孔板。未生成部分排板。`, `Insufficient capacity: ${layout.required} usable wells are required and ${layout.available} are available; use at least ${layout.platesNeeded} plates of this format. No partial layout was generated.`));
-    pendingDrugLayout = layout.error ? null : layout.assignments;
+    pendingDrugLayout = layout.error ? null : [...layout.assignments, ...(layout.fillAssignments || [])];
     renderLiquidResult({
       module: "drug", input: values,
       meta: [bilingual(`${drugs.length} 种独立药物`, `${drugs.length} independent drugs`), bilingual(`排除 ${occupied.length} 个已有内容的孔`, `${occupied.length} populated wells excluded`)],
@@ -1220,6 +1293,27 @@
     renderAll();
     closeLiquidDrawer();
     showToast(bilingual(`已将 ${assignments.length} 个处理孔写入孔板`, `Wrote ${assignments.length} treatment wells to the plate`));
+  }
+
+  function applySerialLayout() {
+    if (!pendingSerialLayout?.length) return;
+    const assignments = pendingSerialLayout.map((item) => ({ ...item }));
+    commit(() => {
+      const levelId = ensureLiquidDimension(bilingual("梯度级别", "Gradient level"), "number");
+      const concentrationId = ensureLiquidDimension(bilingual("目标浓度", "Target concentration"), "number");
+      const replicateId = ensureLiquidDimension(bilingual("梯度复孔", "Gradient replicate"), "number");
+      for (const item of assignments) {
+        const existing = currentWells()[item.wellId];
+        if (existing && Object.keys(existing.params || {}).length) continue;
+        currentWells()[item.wellId] = { params: { [levelId]: item.level, [concentrationId]: item.concentration, [replicateId]: item.replicate } };
+      }
+      project.colorDimension = concentrationId;
+    });
+    selection = new Set(assignments.map((item) => item.wellId));
+    selectionAnchor = assignments[0]?.wellId || null;
+    renderAll();
+    closeLiquidDrawer();
+    showToast(bilingual(`已将 ${assignments.length} 个浓度孔写入孔板`, `Wrote ${assignments.length} concentration wells to the plate`));
   }
 
   function liquidTableText(result, delimiter = "\t") {
@@ -1839,6 +1933,7 @@
     const custom = ["lipo3000-combo", "custom-one", "custom-two"].includes(preset);
     form.querySelectorAll("[data-lipo-only]").forEach((label) => { label.hidden = !lipo; });
     form.querySelectorAll("[data-custom-only]").forEach((label) => { label.hidden = !custom; });
+    form.querySelectorAll("[data-optimization-only]").forEach((label) => { label.hidden = form.elements.optimizationEnabled.value !== "on"; });
     form.querySelector("[data-target-label]").textContent = lipo ? bilingual("每孔质粒质量", "Plasmid mass per well") : bilingual("目标终浓度", "Target final concentration");
     form.querySelector("[data-reagent-label]").textContent = lipo ? "Lipofectamine 3000 / well" : "RNAiMAX / well";
     const stockUnits = lipo ? ["ng/µL", "µg/µL"] : ["nM", "µM", "mM"];
@@ -1846,18 +1941,33 @@
     form.elements.stockUnit.innerHTML = liquidUnitOptions(stockUnits, lipo ? "ng/µL" : "µM");
     form.elements.targetUnit.innerHTML = liquidUnitOptions(targetUnits, lipo ? "ng" : "nM");
     if (form.dataset.presetInitialized !== preset) {
-      form.elements.finalVolume.value = lipo ? 2000 : 300;
-      form.elements.complexVolume.value = lipo ? 250 : 30;
+      const knownRnai = { 6: { finalVolume: 2000, complexVolume: 200, reagentPerWell: 6 }, 24: { finalVolume: 300, complexVolume: 30, reagentPerWell: 0.9 } }[project.plateSize];
+      const knownLipo = project.plateSize === 6 ? { finalVolume: 2000, complexVolume: 250, reagentPerWell: 3.75 } : null;
+      const known = lipo ? knownLipo : preset === "rnai" ? knownRnai : null;
+      form.elements.finalVolume.value = known?.finalVolume ?? "";
+      form.elements.complexVolume.value = known?.complexVolume ?? "";
       form.elements.cargoName.value = lipo ? "Plasmid DNA" : "siRNA";
       form.elements.stockConcentration.value = lipo ? 500 : 10;
       form.elements.targetValue.value = lipo ? 2500 : 10;
-      form.elements.reagentPerWell.value = lipo ? 3.75 : 0.9;
+      form.elements.reagentPerWell.value = known?.reagentPerWell ?? "";
       if (custom) {
         form.elements.finalVolume.value = 2000;
         form.elements.complexVolume.value = preset === "custom-one" ? 125 : 250;
         if (preset === "custom-one") form.elements.tubeLines.value = "A,125,siRNA,cargo,,siRNA,yes\nA,125,Transfection reagent,fixed,3,,no\nA,125,Opti-MEM,diluent,,,yes";
       }
       form.dataset.presetInitialized = preset;
+    }
+    if (form.elements.platePresetAction.value === "apply-default") {
+      const known = preset === "rnai" ? {
+        6: { finalVolume: 2000, complexVolume: 200, reagentPerWell: 6 },
+        24: { finalVolume: 300, complexVolume: 30, reagentPerWell: 0.9 },
+      }[project.plateSize] : preset === "lipo3000" && project.plateSize === 6 ? { finalVolume: 2000, complexVolume: 250, reagentPerWell: 3.75 } : null;
+      if (known) Object.entries(known).forEach(([name, value]) => { form.elements[name].value = value; });
+      else showToast(bilingual("该板型与预设没有内置起始值，已保留当前配方。", "No built-in starting values exist for this format and preset; current values were kept."));
+      form.elements.platePresetAction.value = "keep";
+    } else if (form.elements.platePresetAction.value === "recalculate") {
+      form.elements.platePresetAction.value = "keep";
+      showToast(bilingual("配方已保留；计算时将使用当前只读孔数。", "Recipe kept; calculation will use the current read-only well count."));
     }
   }
 
@@ -1916,6 +2026,16 @@
     }
     if (action === "apply-layout") {
       applyDrugLayout();
+      return;
+    }
+    if (action === "apply-serial-layout") {
+      applySerialLayout();
+      return;
+    }
+    if (action === "print") {
+      document.body.classList.add("liquid-printing");
+      window.addEventListener("afterprint", () => document.body.classList.remove("liquid-printing"), { once: true });
+      window.print();
       return;
     }
     const selectedRecipeId = elements.liquidDrawerContent.querySelector("[data-liquid-library-select]")?.value;

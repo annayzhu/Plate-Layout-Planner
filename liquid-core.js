@@ -84,7 +84,7 @@
 
   function calculateCargoPerWell(cargo, finalVolumeUL) {
     const mode = cargo.targetMode || (cargo.type === "siRNA" ? "final-concentration" : "mass-per-well");
-    if (cargo.type === "siRNA" || mode === "pmol-per-well") {
+    if (cargo.type === "siRNA" && mode !== "mass-per-well") {
       const stockPmolUL = concentrationToBase(cargo.stockConcentration, cargo.stockUnit || "µM", "molar") / 1000;
       let pmol;
       if (mode === "final-concentration") {
@@ -94,6 +94,36 @@
         pmol = amountToPmol(cargo.targetValue, cargo.targetUnit || "pmol");
       }
       return { name: cargo.name || "siRNA", type: "siRNA", amountPmol: pmol, stockVolumeUL: pmol / stockPmolUL };
+    }
+    if (mode === "final-concentration") {
+      const finalNM = concentrationToBase(cargo.targetValue, cargo.targetUnit || "nM", "molar");
+      const amountPmol = finalNM * finalVolumeUL / 1000;
+      if (MOLAR_TO_NM[cargo.stockUnit]) {
+        const stockPmolUL = concentrationToBase(cargo.stockConcentration, cargo.stockUnit, "molar") / 1000;
+        const result = { name: cargo.name || "Cargo", type: cargo.type || "other", amountPmol, stockVolumeUL: amountPmol / stockPmolUL };
+        if (cargo.molecularWeight || cargo.lengthBp) {
+          const molecularWeight = cargo.molecularWeight
+            ? finite(cargo.molecularWeight, "molecular weight", { min: 0, allowZero: false })
+            : finite(cargo.lengthBp, "cargo length", { min: 1, allowZero: false }) * 660;
+          result.massNg = amountPmol * molecularWeight / 1000;
+        }
+        return result;
+      }
+      const molecularWeight = cargo.molecularWeight
+        ? finite(cargo.molecularWeight, "molecular weight", { min: 0, allowZero: false })
+        : finite(cargo.lengthBp, "cargo length", { min: 1, allowZero: false }) * 660;
+      const massNg = amountPmol * molecularWeight / 1000;
+      const stockNgUL = concentrationToBase(cargo.stockConcentration, cargo.stockUnit || "ng/µL", "mass");
+      return { name: cargo.name || "Cargo", type: cargo.type || "other", amountPmol, massNg, stockVolumeUL: massNg / stockNgUL };
+    }
+    if (mode === "pmol-per-well") {
+      const pmol = amountToPmol(cargo.targetValue, cargo.targetUnit || "pmol");
+      const molecularWeight = cargo.molecularWeight
+        ? finite(cargo.molecularWeight, "molecular weight", { min: 0, allowZero: false })
+        : finite(cargo.lengthBp, "cargo length", { min: 1, allowZero: false }) * 660;
+      const massNg = pmol * molecularWeight / 1000;
+      const stockNgUL = concentrationToBase(cargo.stockConcentration, cargo.stockUnit || "ng/µL", "mass");
+      return { name: cargo.name || "Cargo", type: cargo.type || "other", amountPmol: pmol, massNg, stockVolumeUL: massNg / stockNgUL };
     }
     const stockNgUL = concentrationToBase(cargo.stockConcentration, cargo.stockUnit || "ng/µL", "mass");
     const massNg = massToNg(cargo.targetValue, cargo.targetUnit || "ng");
@@ -105,6 +135,31 @@
     return result;
   }
 
+  function resolveCargoTargets(cargos, options) {
+    const resolved = (cargos || []).map((cargo) => ({ ...cargo }));
+    const massRatios = resolved.filter((cargo) => cargo.targetMode === "mass-ratio");
+    if (massRatios.length) {
+      const totalMassNg = massToNg(options.totalCargoMass, options.totalCargoMassUnit || "ng");
+      const ratioTotal = massRatios.reduce((sum, cargo) => sum + finite(cargo.targetValue, `${cargo.name || "cargo"} mass ratio`, { min: 0, allowZero: false }), 0);
+      massRatios.forEach((cargo) => {
+        cargo.targetMode = "mass-per-well";
+        cargo.targetValue = totalMassNg * Number(cargo.targetValue) / ratioTotal;
+        cargo.targetUnit = "ng";
+      });
+    }
+    const molarRatios = resolved.filter((cargo) => cargo.targetMode === "molar-ratio");
+    if (molarRatios.length) {
+      const totalPmol = amountToPmol(options.totalCargoAmount, options.totalCargoAmountUnit || "pmol");
+      const ratioTotal = molarRatios.reduce((sum, cargo) => sum + finite(cargo.targetValue, `${cargo.name || "cargo"} molar ratio`, { min: 0, allowZero: false }), 0);
+      molarRatios.forEach((cargo) => {
+        cargo.targetMode = "pmol-per-well";
+        cargo.targetValue = totalPmol * Number(cargo.targetValue) / ratioTotal;
+        cargo.targetUnit = "pmol";
+      });
+    }
+    return resolved;
+  }
+
   function calculateGenericTransfection(options) {
     const wellCount = finite(options.wellCount, "well count", { min: 1, allowZero: false });
     const overagePercent = finite(options.overagePercent ?? 10, "overage", { min: 0 });
@@ -112,8 +167,26 @@
     const finalVolumeUL = volumeToUL(options.finalVolume ?? 300, options.finalVolumeUnit || "µL");
     const complexVolumeUL = volumeToUL(options.complexVolume ?? 30, options.complexVolumeUnit || "µL");
     const minimum = volumeToUL(options.minimumPipetteVolume ?? 1, options.minimumPipetteUnit || "µL");
-    const cargos = (options.cargos || []).map((cargo) => calculateCargoPerWell(cargo, finalVolumeUL));
+    const cargos = resolveCargoTargets(options.cargos, options).map((cargo) => calculateCargoPerWell(cargo, finalVolumeUL));
     const cargoByName = new Map(cargos.map((cargo) => [cargo.name, cargo]));
+    const selectCargos = (reference) => {
+      if (["all", "all-cargos"].includes(reference)) return cargos;
+      if (reference === "all-siRNA") return cargos.filter((cargo) => cargo.type === "siRNA");
+      if (reference === "all-plasmid") return cargos.filter((cargo) => cargo.type === "plasmid");
+      if (String(reference || "").includes("+")) {
+        const names = String(reference).split("+").map((name) => name.trim()).filter(Boolean);
+        const selected = names.map((name) => cargoByName.get(name));
+        return names.length && selected.every(Boolean) ? selected : [];
+      }
+      const cargo = cargoByName.get(reference);
+      return cargo ? [cargo] : [];
+    };
+    const collectionName = (reference, selected) => {
+      if (reference === "all-plasmid") return "All plasmid cargoes";
+      if (reference === "all-siRNA") return "All siRNA cargoes";
+      if (["all", "all-cargos"].includes(reference)) return "All cargoes";
+      return selected.length > 1 ? selected.map((cargo) => cargo.name).join(" + ") : selected[0]?.name;
+    };
     const workingSolutions = [];
     const perWell = [];
 
@@ -126,14 +199,22 @@
         let componentName = component.name || "Component";
         let volumeUL;
         if (component.kind === "cargo") {
-          const cargo = cargoByName.get(component.cargoName);
-          if (!cargo) throw new Error(`Unknown cargo in tube ${tubeName}: ${component.cargoName}`);
-          componentName = cargo.name;
-          volumeUL = cargo.stockVolumeUL;
-        } else if (component.kind === "ratio-per-ug") {
-          const cargo = cargoByName.get(component.cargoName);
-          if (!cargo?.massNg) throw new Error(`${componentName} requires a mass-based cargo reference.`);
-          volumeUL = cargo.massNg / 1000 * finite(component.ratio, `${componentName} ratio`, { min: 0 });
+          const selected = selectCargos(component.cargoName);
+          if (!selected.length) throw new Error(`Unknown cargo in tube ${tubeName}: ${component.cargoName}`);
+          componentName = collectionName(component.cargoName, selected);
+          volumeUL = selected.reduce((sum, cargo) => sum + cargo.stockVolumeUL, 0);
+        } else if (["ratio-per-ug", "ratio-per-mass"].includes(component.kind)) {
+          const selected = selectCargos(component.cargoName);
+          if (!selected.length || selected.some((cargo) => !Number.isFinite(cargo.massNg))) throw new Error(`${componentName} requires a mass-based cargo reference.`);
+          volumeUL = selected.reduce((sum, cargo) => sum + cargo.massNg, 0) / 1000 * finite(component.ratio, `${componentName} ratio`, { min: 0 });
+        } else if (component.kind === "ratio-per-pmol") {
+          const selected = selectCargos(component.cargoName);
+          if (!selected.length || selected.some((cargo) => !Number.isFinite(cargo.amountPmol))) throw new Error(`${componentName} requires a molar cargo reference.`);
+          volumeUL = selected.reduce((sum, cargo) => sum + cargo.amountPmol, 0) * finite(component.ratio, `${componentName} ratio`, { min: 0 });
+        } else if (component.kind === "ratio-volume") {
+          const selected = selectCargos(component.cargoName);
+          if (!selected.length) throw new Error(`${componentName} requires a cargo reference.`);
+          volumeUL = selected.reduce((sum, cargo) => sum + cargo.stockVolumeUL, 0) * finite(component.ratio, `${componentName} ratio`, { min: 0 });
         } else {
           volumeUL = volumeToUL(component.volumePerWell, component.volumeUnit || "µL");
         }
@@ -158,14 +239,21 @@
             componentName = `${componentName} working solution`;
           }
         }
-        tubeRows.push({ tube: tubeName, component: componentName, volumeUL, dilutionAllowed, originalVolumeUL });
+        tubeRows.push({
+          tube: tubeName,
+          component: componentName,
+          volumeUL,
+          dilutionAllowed,
+          originalVolumeUL,
+          cargoDependent: ["cargo", "ratio-per-ug", "ratio-per-mass", "ratio-per-pmol", "ratio-volume"].includes(component.kind),
+        });
       }
       const usedVolumeUL = tubeRows.reduce((sum, row) => sum + row.volumeUL, 0);
       if (usedVolumeUL > targetVolumeUL + 1e-9) throw new Error(`Components exceed the target volume of tube ${tubeName}.`);
       const diluent = (tube.components || []).find((component) => component.kind === "diluent");
       if (targetVolumeUL - usedVolumeUL > 1e-9 && !diluent) throw new Error(`Tube ${tubeName} needs a diluent component.`);
       perWell.push(...tubeRows);
-      if (diluent) perWell.push({ tube: tubeName, component: diluent.name || "Diluent", volumeUL: targetVolumeUL - usedVolumeUL, dilutionAllowed: true });
+      if (diluent) perWell.push({ tube: tubeName, component: diluent.name || "Diluent", volumeUL: targetVolumeUL - usedVolumeUL, dilutionAllowed: true, cargoDependent: false });
     }
     const totalTubeVolume = perWell.reduce((sum, row) => sum + row.volumeUL, 0);
     if (Math.abs(totalTubeVolume - complexVolumeUL) > 1e-6) throw new Error("Premix tube volumes do not add up to the configured complex volume.");
@@ -222,6 +310,17 @@
     return { ...result, cargo: result.cargos[0], cellSuspensionVolumeUL: result.cellMediumVolumeUL };
   }
 
+  function commonTransfectionComponents(results) {
+    if (!Array.isArray(results) || results.length < 2) return [];
+    const first = results[0];
+    const compatible = results.every((result) => result.overagePercent === first.overagePercent && result.finalVolumeUL === first.finalVolumeUL && result.complexVolumeUL === first.complexVolumeUL);
+    if (!compatible) return [];
+    const commonRows = (result) => (result.totals || []).filter((row) => !row.cargoDependent).map((row) => ({ tube: row.tube, component: row.component, volumeUL: row.volumeUL }));
+    const signature = JSON.stringify(commonRows(first));
+    if (!results.every((result) => JSON.stringify(commonRows(result)) === signature)) return [];
+    return commonRows(first).map((row) => `${row.tube}\u0000${row.component}`);
+  }
+
   function generateConcentrationSeries(options) {
     const high = finite(options.high, "highest concentration", { min: 0, allowZero: false });
     const points = Math.floor(finite(options.points, "number of points", { min: 2, allowZero: false }));
@@ -271,13 +370,13 @@
         };
         downstreamTransferUL = transferVolumeUL;
       }
-      return { strategy: "serial", concentrations, requestedVolumeUL, preparedVolumeUL: round(preparedVolumeUL), rows };
+      return { strategy: "serial", concentrations, requestedVolumeUL, preparedVolumeUL: round(preparedVolumeUL), stockConsumptionUL: round(rows[0]?.transferVolumeUL || 0), rows };
     }
     const rows = concentrations.map((concentration, index) => {
       const stockVolumeUL = preparedVolumeUL * concentration / stock;
       return { level: index + 1, concentration, source: "stock", transferVolumeUL: round(stockVolumeUL), diluentVolumeUL: round(preparedVolumeUL - stockVolumeUL), totalVolumeUL: round(preparedVolumeUL) };
     });
-    return { strategy: "direct", concentrations, requestedVolumeUL, preparedVolumeUL: round(preparedVolumeUL), rows };
+    return { strategy: "direct", concentrations, requestedVolumeUL, preparedVolumeUL: round(preparedVolumeUL), stockConsumptionUL: round(rows.reduce((sum, row) => sum + row.transferVolumeUL, 0)), rows };
   }
 
   function orderWells(size, wellIds, orientation = "row") {
@@ -287,15 +386,16 @@
     return rowMajor.sort((left, right) => Number(left.parsed[2]) - Number(right.parsed[2]) || left.parsed[1].localeCompare(right.parsed[1])).map((entry) => entry.id);
   }
 
-  function edgeWellIds(wellIds) {
+  function edgeWellIds(wellIds, plateSize) {
     const parsed = wellIds.map((id) => ({ id, match: /^([A-Z]+)(\d+)$/.exec(id) })).filter((item) => item.match);
     if (!parsed.length) return new Set();
+    const geometry = { 6: [2, 3], 12: [3, 4], 24: [4, 6], 96: [8, 12], 384: [16, 24] }[Number(plateSize)];
     const rows = parsed.map((item) => item.match[1]);
     const columns = parsed.map((item) => Number(item.match[2]));
-    const firstRow = rows.slice().sort()[0];
-    const lastRow = rows.slice().sort().at(-1);
-    const firstColumn = Math.min(...columns);
-    const lastColumn = Math.max(...columns);
+    const firstRow = "A";
+    const lastRow = geometry ? String.fromCharCode(64 + geometry[0]) : rows.slice().sort().at(-1);
+    const firstColumn = 1;
+    const lastColumn = geometry ? geometry[1] : Math.max(...columns);
     return new Set(parsed.filter((item) => item.match[1] === firstRow || item.match[1] === lastRow || Number(item.match[2]) === firstColumn || Number(item.match[2]) === lastColumn).map((item) => item.id));
   }
 
@@ -327,9 +427,15 @@
   function planDrugGradientLayout(options) {
     const occupied = new Set(options.occupiedWellIds || []);
     const ordered = orderWells(options.plateSize, options.wellIds || [], options.orientation);
-    const edges = options.avoidEdges ? edgeWellIds(ordered) : new Set();
-    const candidates = ordered.filter((wellId) => !occupied.has(wellId) && !edges.has(wellId));
+    const edges = options.avoidEdges || (options.edgeFill && options.edgeFill !== "off") ? edgeWellIds(ordered, options.plateSize) : new Set();
+    const fillAssignments = options.edgeFill && options.edgeFill !== "off"
+      ? ordered.filter((wellId) => edges.has(wellId) && !occupied.has(wellId)).map((wellId) => ({ wellId, drug: options.edgeFill, concentration: 0, replicate: 1, controlType: "edge-fill" }))
+      : [];
+    const fixedControlWellIds = options.controlPosition === "fixed" ? (options.fixedControlWellIds || []).filter((wellId) => ordered.includes(wellId) && !occupied.has(wellId)) : [];
+    const fixedControlSet = new Set(fixedControlWellIds);
+    const candidates = ordered.filter((wellId) => !occupied.has(wellId) && !edges.has(wellId) && !fixedControlSet.has(wellId));
     const planned = [];
+    const fixedControls = [];
     for (const drug of options.drugs || []) {
       const series = generateConcentrationSeries(drug);
       const replicates = Math.floor(finite(drug.replicates ?? 3, "replicates", { min: 1, allowZero: false }));
@@ -342,13 +448,18 @@
         for (const concentration of series) for (let replicate = 1; replicate <= replicates; replicate += 1) treatments.push({ drug: drug.name || "Drug", concentration, replicate, controlType: "treatment" });
       }
       const controls = Array.from({ length: Math.max(0, Math.floor(Number(options.controlsPerDrug) || 0)) }, (_, index) => ({ drug: drug.name || "Drug", concentration: 0, replicate: index + 1, controlType: "vehicle" }));
-      planned.push(...(options.controlPosition === "start" ? [...controls, ...treatments] : [...treatments, ...controls]));
+      if (options.controlPosition === "fixed") fixedControls.push(...controls);
+      else planned.push(...(options.controlPosition === "start" ? [...controls, ...treatments] : [...treatments, ...controls]));
+      if (options.controlPosition === "fixed") planned.push(...treatments);
     }
-    const required = planned.length;
-    const available = candidates.length;
+    const required = planned.length + fixedControls.length;
+    const available = candidates.length + fixedControlWellIds.length;
     const platesNeeded = available ? Math.max(1, Math.ceil(required / available)) : Infinity;
-    if (required > available) return { assignments: [], required, available, platesNeeded, candidates, error: "insufficient-capacity" };
-    return { assignments: planned.map((item, index) => ({ wellId: candidates[index], ...item })), required, available, platesNeeded, candidates, error: null };
+    if (fixedControls.length > fixedControlWellIds.length) return { assignments: [], fillAssignments, required, available, platesNeeded, candidates, error: "insufficient-capacity" };
+    if (planned.length > candidates.length) return { assignments: [], fillAssignments, required, available, platesNeeded, candidates, error: "insufficient-capacity" };
+    const assignments = planned.map((item, index) => ({ wellId: candidates[index], ...item }));
+    fixedControls.forEach((item, index) => assignments.push({ wellId: fixedControlWellIds[index], ...item }));
+    return { assignments, fillAssignments, required, available, platesNeeded, candidates, error: null };
   }
 
   return {
@@ -368,6 +479,7 @@
     calculateGenericTransfection,
     calculateRnaiMaxTransfection,
     calculateLipo3000Transfection,
+    commonTransfectionComponents,
     generateConcentrationSeries,
     calculateGradientPreparation,
     calculateDrugDosingPreparation,

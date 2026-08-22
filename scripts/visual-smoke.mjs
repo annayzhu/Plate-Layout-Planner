@@ -106,6 +106,7 @@ try {
   if (!liquidResultText.includes("A 管加入 siRNA") || !liquidResultText.includes("室温孵育 5 min") || !liquidResultText.includes("24 孔")) {
     throw new Error(`Transfection checklist is incomplete: ${liquidResultText}`);
   }
+  if (await page.locator('[data-liquid-action="print"]').count() !== 1) throw new Error("Liquid results do not expose a Print / PDF action.");
   await page.screenshot({ path: resolve(outputDirectory, "02-liquid-transfection.png"), fullPage: true });
   await page.locator('[data-liquid-action="save"]').click();
   const savedLiquidPlans = await page.evaluate(() => JSON.parse(localStorage.getItem("plate-layout-studio:project:v1")).liquidPlans || []);
@@ -126,6 +127,9 @@ try {
   transfectionForm = page.locator("#liquidActiveForm");
   await transfectionForm.locator('[name="preset"]').selectOption("lipo3000");
   if (await page.locator("[data-lipo-only]:visible").count() !== 2) throw new Error("Lipofectamine 3000 fields did not appear after switching presets.");
+  await transfectionForm.locator('[name="finalVolume"]').fill("2000");
+  await transfectionForm.locator('[name="complexVolume"]').fill("250");
+  await transfectionForm.locator('[name="reagentPerWell"]').fill("3.75");
   await transfectionForm.locator('button[type="submit"]').click();
   const lipoResultText = await page.locator("#liquidResultHost").innerText();
   if (!lipoResultText.includes("P3000") || !lipoResultText.includes("Lipofectamine 3000")) throw new Error(`Lipofectamine 3000 two-tube result is incomplete: ${lipoResultText}`);
@@ -140,6 +144,29 @@ try {
   const customTransfectionText = await page.locator("#liquidResultHost").innerText();
   if (!customTransfectionText.includes("working solution") || !customTransfectionText.includes("已确认应用")) {
     throw new Error(`Confirmed working-solution calculation was not applied: ${customTransfectionText}`);
+  }
+  await transfectionForm.locator('[name="groupDimension"]').selectOption("treatment");
+  await transfectionForm.locator('[name="groupRoleLines"]').fill("Drug A=Mock");
+  await transfectionForm.locator('[name="tubeLines"]').fill("A,20,siGroup,cargo,,siGroup,yes\nA,20,Transfection reagent,ratio-volume,2,siGroup,no\nA,20,Opti-MEM,diluent,,,yes");
+  await transfectionForm.locator('button[type="submit"]').click();
+  const mockText = await page.locator("#liquidResultHost").innerText();
+  if (mockText.includes("无法计算") || mockText.includes("Transfection reagent") || !mockText.includes("Opti-MEM")) {
+    throw new Error(`Mock group did not remove all cargo-dependent components and refill with diluent: ${mockText}`);
+  }
+  await transfectionForm.locator('[name="groupRoleLines"]').fill("Drug A=mock");
+  await transfectionForm.locator('button[type="submit"]').click();
+  if (!(await page.locator("#liquidResultHost").innerText()).includes("分组角色第 1 行无效")) throw new Error("Invalid group role silently fell back to a transfection group.");
+  for (let index = errors.length - 1; index >= 0; index -= 1) if (errors[index].includes("分组角色第 1 行无效")) errors.splice(index, 1);
+  await transfectionForm.locator('[name="groupRoleLines"]').fill("Drug A=Transfection");
+  await transfectionForm.locator('[name="groupCargoLines"]').fill("Drug A|siGroup,siRNA,10,µM,final-concentration,10,nM,,");
+  await transfectionForm.locator('[name="tubeLines"]').fill("A,20,siGroup,cargo,,siGroup,yes\nA,20,Transfection reagent,fixed,1,,no\nA,20,Opti-MEM,diluent,,,yes");
+  await transfectionForm.locator('[name="optimizationEnabled"]').selectOption("on");
+  await transfectionForm.locator('[name="optimizationLines"]').fill("Low,0.5,0.75\nHigh,2,1.5");
+  await transfectionForm.locator('[name="workingSolutionMode"]').selectOption("suggest");
+  await transfectionForm.locator('button[type="submit"]').click();
+  const optimizedText = await page.locator("#liquidResultHost").innerText();
+  for (const expected of ["Drug A · Low", "Drug A · High", "siGroup", "2 个独立变体"]) {
+    if (!optimizedText.includes(expected)) throw new Error(`Grouped optimization result is missing ${expected}: ${optimizedText}`);
   }
   await page.screenshot({ path: resolve(outputDirectory, "02c-custom-transfection-and-library.png"), fullPage: true });
   await page.locator('[data-liquid-action="save-preset"]').click();
@@ -157,7 +184,7 @@ try {
   const recipeDownload = await recipeDownloadPromise;
   const recipePath = await recipeDownload.path();
   await page.locator("[data-liquid-library-import]").setInputFiles(recipePath);
-  if (await page.locator("[data-liquid-library-select] option").count() < 5) throw new Error("Exported recipe JSON was not imported back into the library.");
+  if (await page.locator(`[data-liquid-library-select] option[value="${customRecipeIds[0]}"]`).count() !== 1) throw new Error("Exported recipe JSON was not imported back into the library.");
 
   await page.locator('#liquidModuleTabs [data-liquid-module="basic"]').click();
   await page.locator('#liquidActiveForm button[type="submit"]').click();
@@ -173,7 +200,25 @@ try {
   if (await page.locator("#liquidResultHost .liquid-table tbody tr").count() !== 3) throw new Error("Serial dilution did not produce three concentration levels.");
   const serialText = await page.locator("#liquidResultHost").innerText();
   for (const expected of ["175 µL", "150 µL", "100 µL", "最终保留"]) if (!serialText.includes(expected)) throw new Error(`Backward serial-volume calculation is missing ${expected}: ${serialText}`);
+  if (!serialText.includes("母液消耗比较")) throw new Error(`Serial dilution did not compare stock consumption: ${serialText}`);
   await page.locator("#closeLiquidDrawerButton").click();
+
+  await page.locator("#clearSelectionButton").click();
+  await page.locator('[data-well="A1"]').click();
+  await page.locator('[data-well="D1"]').click({ modifiers: ["Control"] });
+  await page.locator('[data-well="D2"]').click({ modifiers: ["Control"] });
+  await page.locator('[data-well="D3"]').click({ modifiers: ["Control"] });
+  await page.locator('.liquid-module-launch[data-liquid-module="serial"]').click();
+  await page.locator('#liquidActiveForm [name="mapToPlate"]').selectOption("on");
+  await page.locator('#liquidActiveForm [name="replicates"]').fill("1");
+  await page.locator('#liquidActiveForm button[type="submit"]').click();
+  if (await page.locator(".liquid-preview-well").count() !== 3 || await page.locator('[data-liquid-action="apply-serial-layout"]').count() !== 1) {
+    throw new Error("Serial concentration mapping did not create a three-well preview and confirmation action.");
+  }
+  if (!(await page.locator("#liquidResultHost").innerText()).includes("排除 1 个已有内容")) throw new Error("Serial preview did not explain that one populated well was excluded.");
+  await page.locator('[data-liquid-action="apply-serial-layout"]').click();
+  const d1SerialTitle = await page.locator('[data-well="D1"]').getAttribute("title");
+  if (!d1SerialTitle?.includes("目标浓度")) throw new Error(`Confirmed serial layout was not written to D1: ${d1SerialTitle}`);
 
   if (await page.locator("#clearSelectionButton").isEnabled()) await page.locator("#clearSelectionButton").click();
   await page.locator('.liquid-module-launch[data-liquid-module="drug"]').click();
@@ -190,8 +235,19 @@ try {
   if (!drugResultText.includes("加药液浓度") || !drugResultText.includes("孔内溶剂终比例") || await page.locator(".liquid-preview-well").count() !== 5) {
     throw new Error(`Drug-specific dosing, vehicle, controls, or edge-safe layout is incomplete: ${drugResultText}`);
   }
+  await page.locator('[name="controlPosition"]').selectOption("fixed");
+  await page.locator('[name="fixedControlWells"]').fill("B2");
+  await page.locator('[name="avoidEdges"]').selectOption("off");
+  await page.locator('[name="edgeFill"]').selectOption("PBS");
+  await page.locator('#liquidActiveForm button[type="submit"]').click();
+  const fixedDrugPreview = await page.locator("#liquidResultHost").innerText();
+  if (!fixedDrugPreview.includes("B2") || !fixedDrugPreview.includes("PBS") || await page.locator('[data-liquid-action="apply-layout"]').count() !== 1) {
+    throw new Error(`Fixed control or edge-fill preview is incomplete: ${fixedDrugPreview}`);
+  }
+  await page.locator('[data-liquid-action="apply-layout"]').click();
+  const b2DrugTitle = await page.locator('[data-well="B2"]').getAttribute("title");
+  if (!b2DrugTitle?.includes("vehicle")) throw new Error(`Fixed vehicle control was not written to B2: ${b2DrugTitle}`);
   await page.screenshot({ path: resolve(outputDirectory, "02d-drug-dosing-and-layout.png"), fullPage: true });
-  await page.locator("#closeLiquidDrawerButton").click();
 
   if (await page.locator("#clearSelectionButton").isEnabled()) await page.locator("#clearSelectionButton").click();
   await page.locator('[data-well="A1"]').click();
@@ -477,6 +533,32 @@ try {
   if (!legacyA1Title?.includes("Legacy-A")) throw new Error(`Legacy JSON import lost A1 data: ${legacyA1Title}`);
   const legacyLiquidPlans = await page.evaluate(() => JSON.parse(localStorage.getItem("plate-layout-studio:project:v1")).liquidPlans);
   if (!Array.isArray(legacyLiquidPlans) || legacyLiquidPlans.length !== 0) throw new Error("Legacy JSON import did not normalize missing liquid plans.");
+
+  await page.evaluate(() => localStorage.clear());
+  await page.reload({ waitUntil: "networkidle" });
+  await page.locator('.plate-option[data-size="12"]').click();
+  await page.locator('.liquid-module-launch[data-liquid-module="transfection"]').click();
+  const unsupportedPlateForm = page.locator("#liquidActiveForm");
+  for (const name of ["finalVolume", "complexVolume", "reagentPerWell"]) {
+    if ((await unsupportedPlateForm.locator(`[name="${name}"]`).inputValue()) !== "") throw new Error(`Unsupported 12-well RNAiMAX format silently received a ${name} default.`);
+  }
+  if (!(await unsupportedPlateForm.innerText()).includes("不自动线性外推")) throw new Error("Unsupported plate format does not explain that recipe values are not extrapolated.");
+  await page.locator("[data-liquid-library-select]").selectOption("builtin-rnai");
+  await page.locator('[data-liquid-action="load-preset"]').click();
+  for (const name of ["finalVolume", "complexVolume", "reagentPerWell"]) {
+    if ((await page.locator(`#liquidActiveForm [name="${name}"]`).inputValue()) !== "") throw new Error(`Loading the built-in RNAiMAX recipe silently injected ${name} into an unsupported 12-well format.`);
+  }
+  await page.locator("#closeLiquidDrawerButton").click();
+  await page.locator('.plate-option[data-size="6"]').click();
+  await page.locator('.liquid-module-launch[data-liquid-module="transfection"]').click();
+  const sixWellForm = page.locator("#liquidActiveForm");
+  await page.locator("[data-liquid-library-select]").selectOption("builtin-rnai");
+  await page.locator('[data-liquid-action="load-preset"]').click();
+  await sixWellForm.locator('[name="preset"]').selectOption("lipo3000");
+  await sixWellForm.locator('[name="preset"]').selectOption("rnai");
+  if ((await sixWellForm.locator('[name="finalVolume"]').inputValue()) !== "2000" || (await sixWellForm.locator('[name="complexVolume"]').inputValue()) !== "200" || (await sixWellForm.locator('[name="reagentPerWell"]').inputValue()) !== "6") {
+    throw new Error("Switching presets lost the known six-well RNAiMAX starting values.");
+  }
 
   if (errors.length) throw new Error(`Browser errors:\n${errors.join("\n")}`);
   console.log(JSON.stringify({

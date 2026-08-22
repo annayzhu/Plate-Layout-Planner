@@ -578,4 +578,16 @@ footer { display: flex; justify-content: space-between; gap: 20px; padding: 18px
   .plate-card { border: 0; box-shadow: none; }
   .plate-scroll { overflow: visible; }
   .plate-canvas { transform-origin: top left; }
+  body.liquid-printing .page-shell { display: none !important; }
+  body.liquid-printing .liquid-drawer { position: static; display: block !important; }
+  body.liquid-printing .liquid-drawer-panel { display: block; height: auto; border: 0; box-shadow: none; }
+  body.liquid-printing .liquid-drawer-backdrop,
+  body.liquid-printing .liquid-drawer-header,
+  body.liquid-printing .liquid-module-tabs,
+  body.liquid-printing .liquid-recipe-library,
+  body.liquid-printing .liquid-form-card,
+  body.liquid-printing .liquid-action-row { display: none !important; }
+  body.liquid-printing .liquid-drawer-content { overflow: visible; padding: 0; }
+  body.liquid-printing .liquid-workspace { display: block; }
+  body.liquid-printing .liquid-result-card { border: 0; box-shadow: none; }
 }

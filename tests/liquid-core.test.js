@@ -25,6 +25,89 @@ test("solution preparation supports mass and molar targets with purity correctio
   assert.equal(molarResult.massNg, 180000);
 });
 
+test("fixed-ratio extra-add preparation supports mixed units, multiple reagents, and batch overage", () => {
+  const result = Liquid.calculateFixedRatioPreparation({
+    meaning: "extra",
+    volumeMode: "per-well",
+    baseVolume: 100,
+    baseUnit: "µL",
+    wellCount: 3,
+    overagePercent: 10,
+    reagents: [
+      { name: "CCK-8", referenceVolume: 100, referenceUnit: "µL", reagentVolume: 10, reagentUnit: "µL" },
+      { name: "Dye", referenceVolume: 1, referenceUnit: "mL", reagentVolume: 10, reagentUnit: "µL" },
+    ],
+  });
+  assert.equal(result.theoretical.mediumVolumeUL, 100);
+  assert.deepEqual(result.theoretical.reagents.map((row) => row.volumeUL), [10, 1]);
+  assert.equal(result.theoretical.finalVolumeUL, 111);
+  assert.equal(result.equivalentWells, 3.3);
+  assert.deepEqual(result.batch.reagents.map((row) => row.volumeUL), [33, 3.3]);
+  assert.equal(result.batch.finalVolumeUL, 366.3);
+});
+
+test("fixed-ratio final-volume preparation subtracts every reagent from medium", () => {
+  const result = Liquid.calculateFixedRatioPreparation({
+    meaning: "final",
+    volumeMode: "per-well",
+    baseVolume: 100,
+    baseUnit: "µL",
+    wellCount: 2,
+    overagePercent: 10,
+    reagents: [
+      { name: "A", referenceVolume: 100, referenceUnit: "µL", reagentVolume: 10, reagentUnit: "µL" },
+      { name: "B", referenceVolume: 100, referenceUnit: "µL", reagentVolume: 1, reagentUnit: "µL" },
+    ],
+  });
+  assert.equal(result.theoretical.mediumVolumeUL, 89);
+  assert.equal(result.theoretical.finalVolumeUL, 100);
+  assert.equal(result.batch.mediumVolumeUL, 195.8);
+  assert.equal(result.batch.finalVolumeUL, 220);
+});
+
+test("fixed-ratio direct-total mode and duplicate names remain auditable", () => {
+  const result = Liquid.calculateFixedRatioPreparation({
+    meaning: "extra",
+    volumeMode: "total",
+    baseVolume: 12,
+    baseUnit: "mL",
+    overagePercent: 10,
+    reagents: [
+      { name: "Dye", referenceVolume: 100, referenceUnit: "µL", reagentVolume: 10, reagentUnit: "µL" },
+      { name: "Dye", referenceVolume: 1, referenceUnit: "mL", reagentVolume: 10, reagentUnit: "µL" },
+    ],
+  });
+  assert.equal(result.requestedVolumeUL, 12000);
+  assert.deepEqual(result.batch.reagents.map((row) => row.volumeUL), [1320, 132]);
+  assert.ok(result.warnings.some((warning) => warning.code === "duplicate-name"));
+});
+
+test("fixed-ratio preparation blocks invalid final fractions and supports confirmed working solution", () => {
+  assert.throws(() => Liquid.calculateFixedRatioPreparation({
+    meaning: "final", volumeMode: "total", baseVolume: 100, baseUnit: "µL",
+    reagents: [{ name: "A", referenceVolume: 100, referenceUnit: "µL", reagentVolume: 100, reagentUnit: "µL" }],
+  }), /less than 100%/);
+
+  const proposed = Liquid.calculateFixedRatioPreparation({
+    meaning: "final", volumeMode: "per-well", baseVolume: 100, baseUnit: "µL", wellCount: 1, overagePercent: 0,
+    minimumPipetteVolume: 1,
+    reagents: [{ name: "Dye", referenceVolume: 1000, referenceUnit: "µL", reagentVolume: 0.1, reagentUnit: "µL" }],
+  });
+  assert.equal(proposed.workingSolutions[0].applied, false);
+  assert.equal(proposed.batch.reagents[0].volumeUL, 0.01);
+  const applied = Liquid.calculateFixedRatioPreparation({
+    meaning: "final", volumeMode: "per-well", baseVolume: 100, baseUnit: "µL", wellCount: 1, overagePercent: 0,
+    minimumPipetteVolume: 1, applyWorkingSolutions: true,
+    reagents: [{ name: "Dye", referenceVolume: 1000, referenceUnit: "µL", reagentVolume: 0.1, reagentUnit: "µL" }],
+  });
+  assert.equal(applied.workingSolutions[0].applied, true);
+  assert.equal(applied.workingSolutions[0].stockForWorkingSolutionUL, 1);
+  assert.equal(applied.workingSolutions[0].diluentForWorkingSolutionUL, 99);
+  assert.equal(applied.workingSolutions[0].preparedWorkingSolutionUL, 100);
+  assert.equal(applied.batch.reagents[0].volumeUL, 1);
+  assert.equal(applied.batch.mediumVolumeUL + applied.batch.reagents[0].volumeUL, applied.batch.finalVolumeUL);
+});
+
 test("RNAiMAX preset reproduces the accepted 24-well siRNA calculation", () => {
   const result = Liquid.calculateRnaiMaxTransfection({
     wellCount: 36,

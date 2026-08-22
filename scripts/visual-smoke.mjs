@@ -114,6 +114,7 @@ try {
   if (await page.locator("[data-lipo-only]:visible").count()) throw new Error("Lipofectamine-only fields were visible in the RNAiMAX preset.");
 
   await page.locator('#liquidModuleTabs [data-liquid-module="basic"]').click();
+  await page.locator('#liquidActiveForm [name="calculationType"]').selectOption("dilution");
   await page.locator('#liquidActiveForm [name="stockConcentration"]').fill("77");
   await page.locator('#liquidModuleTabs [data-liquid-module="transfection"]').click();
   transfectionForm = page.locator("#liquidActiveForm");
@@ -187,9 +188,99 @@ try {
   if (await page.locator(`[data-liquid-library-select] option[value="${customRecipeIds[0]}"]`).count() !== 1) throw new Error("Exported recipe JSON was not imported back into the library.");
 
   await page.locator('#liquidModuleTabs [data-liquid-module="basic"]').click();
+  const basicForm = page.locator("#liquidActiveForm");
+  await basicForm.locator('[name="calculationType"]').selectOption("fixed");
+  if ((await basicForm.locator('[name="calculationType"]').inputValue()) !== "fixed" || await basicForm.locator("[data-fixed-reagent-row]").count() !== 1) throw new Error("Basic preparation did not open in the lightweight fixed-ratio task with one editable example.");
+  if ((await basicForm.locator('[name="wellCount"]').inputValue()) !== "24" || await basicForm.locator('[name="wellCount"]').isEditable()) throw new Error("Fixed-ratio plate scope is not a read-only 24-well count.");
   await page.locator('#liquidActiveForm button[type="submit"]').click();
-  const basicResultText = await page.locator("#liquidResultHost").innerText();
-  if (!basicResultText.includes("110 µL") || !basicResultText.includes("10,890 µL")) throw new Error(`Routine dilution result is incorrect: ${basicResultText}`);
+  let basicResultText = await page.locator("#liquidResultHost").innerText();
+  for (const expected of ["实际孔数 24", "等效 26.4 孔", "2,640 µL", "264 µL", "2,904 µL"]) if (!basicResultText.includes(expected)) throw new Error(`Fixed-ratio CCK-8 result is missing ${expected}: ${basicResultText}`);
+  await page.locator('[data-liquid-action="add-fixed-reagent"]').click();
+  const secondReagent = basicForm.locator("[data-fixed-reagent-row]").nth(1);
+  await secondReagent.locator('[data-fixed-field="name"]').fill("Dye");
+  await secondReagent.locator('[data-fixed-field="referenceVolume"]').fill("1");
+  await secondReagent.locator('[data-fixed-field="referenceUnit"]').selectOption("mL");
+  await secondReagent.locator('[data-fixed-field="reagentVolume"]').fill("10");
+  await basicForm.locator('[name="fixedMeaning"]').selectOption("final");
+  await basicForm.locator('button[type="submit"]').click();
+  basicResultText = await page.locator("#liquidResultHost").innerText();
+  for (const expected of ["理论每孔", "89 µL", "10 µL", "1 µL", "2,349.6 µL", "2,640 µL"]) if (!basicResultText.includes(expected)) throw new Error(`Multi-reagent final-mixture result is missing ${expected}: ${basicResultText}`);
+  await page.locator('[data-liquid-action="save"]').click();
+  await page.locator('[data-liquid-action="save-preset"]').click();
+  const fixedRecipeId = await page.locator("[data-liquid-library-select]").inputValue();
+  await page.locator("#closeLiquidDrawerButton").click();
+  await page.locator('.liquid-module-launch[data-liquid-module="basic"]').click();
+  if ((await page.locator('#liquidActiveForm [name="fixedMeaning"]').inputValue()) !== "final" || await page.locator("#liquidActiveForm [data-fixed-reagent-row]").count() !== 2) throw new Error("Fixed-ratio draft was not restored after closing and reopening the drawer.");
+  await page.locator('#liquidActiveForm [name="calculationType"]').selectOption("dilution");
+  await page.locator('#liquidActiveForm button[type="submit"]').click();
+  basicResultText = await page.locator("#liquidResultHost").innerText();
+  if (!basicResultText.includes("110 µL") || !basicResultText.includes("10,890 µL")) throw new Error(`Routine dilution regression result is incorrect: ${basicResultText}`);
+  await page.locator('#liquidActiveForm [name="stockConcentration"]').fill("77");
+  await page.locator('#liquidActiveForm [data-liquid-action="reset"]').click();
+  if ((await page.locator('#liquidActiveForm [name="stockConcentration"]').inputValue()) !== "10") throw new Error("Reset did not restore the active stock-dilution task.");
+  await page.locator('#liquidActiveForm [name="calculationType"]').selectOption("fixed");
+  if (await page.locator("#liquidActiveForm [data-fixed-reagent-row]").count() !== 2) throw new Error("Resetting stock dilution erased the fixed-ratio task draft.");
+  await page.locator("[data-liquid-library-select]").selectOption(fixedRecipeId);
+  await page.locator('[data-liquid-action="load-preset"]').click();
+  if ((await page.locator('#liquidActiveForm [name="calculationType"]').inputValue()) !== "fixed" || await page.locator("#liquidActiveForm [data-fixed-reagent-row]").count() !== 2) throw new Error("Saved fixed-ratio recipe did not reload correctly.");
+  await page.locator('#liquidActiveForm [data-fixed-reagent-row]').nth(1).locator('[data-liquid-action="remove-fixed-reagent"]').click();
+  const tinyReagent = page.locator('#liquidActiveForm [data-fixed-reagent-row]').first();
+  await tinyReagent.locator('[data-fixed-field="name"]').fill("Dye");
+  await tinyReagent.locator('[data-fixed-field="referenceVolume"]').fill("1000");
+  await tinyReagent.locator('[data-fixed-field="reagentVolume"]').fill("0.1");
+  await page.locator('#liquidActiveForm [name="fixedVolumeMode"]').selectOption("total");
+  await page.locator('#liquidActiveForm [name="fixedBaseVolume"]').fill("100");
+  await page.locator('#liquidActiveForm [name="fixedOveragePercent"]').fill("0");
+  await page.locator('#liquidActiveForm [name="workingSolutionMode"]').selectOption("apply");
+  await page.locator('#liquidActiveForm button[type="submit"]').click();
+  if (await page.locator('[data-liquid-action="confirm-basic-working-solution"]').count() !== 1 || !(await page.locator("#liquidResultHost").innerText()).includes("尚未应用")) throw new Error("Working-solution request was applied without a second confirmation.");
+  await page.locator('[data-liquid-action="confirm-basic-working-solution"]').click();
+  const confirmedWorkingText = await page.locator("#liquidResultHost").innerText();
+  for (const expected of ["已确认应用", "1 µL Dye 原液", "99 µL 稀释液", "得到 100 µL", "整批取用 1 µL"]) if (!confirmedWorkingText.includes(expected)) throw new Error(`Confirmed working-solution instructions are missing ${expected}: ${confirmedWorkingText}`);
+  if (await page.locator('[data-liquid-action="confirm-basic-working-solution"]').count()) throw new Error("Working solution still requested confirmation after it was explicitly confirmed.");
+  await page.locator('[data-liquid-action="add-fixed-reagent"]').click();
+  if ((await page.locator('[name="workingSolutionConfirmed"]').inputValue()) !== "no") throw new Error("Adding a reagent preserved a stale working-solution confirmation.");
+  const addedReagent = page.locator('#liquidActiveForm [data-fixed-reagent-row]').last();
+  await addedReagent.locator('[data-fixed-field="name"]').fill("Second reagent");
+  await page.locator('#liquidActiveForm button[type="submit"]').click();
+  if (await page.locator('[data-liquid-action="confirm-basic-working-solution"]').count() !== 1) throw new Error("Changed reagent collection did not require a fresh confirmation.");
+  await page.locator('[data-liquid-action="confirm-basic-working-solution"]').click();
+  await addedReagent.locator('[data-liquid-action="remove-fixed-reagent"]').click();
+  if ((await page.locator('[name="workingSolutionConfirmed"]').inputValue()) !== "no") throw new Error("Removing a reagent preserved a stale working-solution confirmation.");
+  await page.locator('#liquidActiveForm button[type="submit"]').click();
+  if (await page.locator('[data-liquid-action="confirm-basic-working-solution"]').count() !== 1) throw new Error("Removing a reagent did not require a fresh confirmation.");
+  await page.locator('[data-liquid-action="confirm-basic-working-solution"]').click();
+  await page.locator('[data-liquid-action="save-preset"]').click();
+  const confirmedWorkingRecipeId = await page.locator("[data-liquid-library-select]").inputValue();
+  await page.locator("#closeLiquidDrawerButton").click();
+  await page.locator('.liquid-module-launch[data-liquid-module="basic"]').click();
+  if ((await page.locator('[name="workingSolutionConfirmed"]').inputValue()) !== "no") throw new Error("Closing and reopening preserved a stale working-solution confirmation.");
+  await page.locator('#liquidActiveForm button[type="submit"]').click();
+  if (await page.locator('[data-liquid-action="confirm-basic-working-solution"]').count() !== 1) throw new Error("Reopened working-solution calculation did not require a fresh confirmation.");
+  await page.locator("[data-liquid-library-select]").selectOption(confirmedWorkingRecipeId);
+  await page.locator('[data-liquid-action="load-preset"]').click();
+  if ((await page.locator('[name="workingSolutionConfirmed"]').inputValue()) !== "no") throw new Error("A saved preset restored a stale working-solution confirmation.");
+  await page.locator('#liquidActiveForm button[type="submit"]').click();
+  if (await page.locator('[data-liquid-action="confirm-basic-working-solution"]').count() !== 1) throw new Error("Loaded working-solution preset did not require a fresh confirmation.");
+
+  const recipeCountBeforeLegacyImport = await page.locator("[data-liquid-library-select] option").count();
+  await page.locator("[data-liquid-library-import]").setInputFiles({
+    name: "legacy-basic-recipes.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(JSON.stringify({ recipes: [
+      { id: "legacy-dilution", module: "basic", name: "Legacy dilution", input: { kind: "molar", stockConcentration: "42", stockUnit: "mM", targetConcentration: "2", targetUnit: "µM", volumeMode: "total", totalVolume: "5", volumeUnit: "mL", overagePercent: "7" } },
+      { id: "legacy-solid", module: "basic", name: "Legacy solid", input: { calculationType: "solid", kind: "mass", targetConcentration: "3", targetUnit: "mg/mL", totalVolume: "4", volumeUnit: "mL", purityPercent: "95", overagePercent: "8" } },
+    ] })),
+  });
+  await page.waitForFunction((expected) => document.querySelectorAll("[data-liquid-library-select] option").length >= expected, recipeCountBeforeLegacyImport + 2);
+  const legacyRecipeIds = await page.locator("[data-liquid-library-select] option").evaluateAll((options) => options.slice(-2).map((option) => option.value));
+  await page.locator("[data-liquid-library-select]").selectOption(legacyRecipeIds[0]);
+  await page.locator('[data-liquid-action="load-preset"]').click();
+  const migratedDilutionValues = await page.locator("#liquidActiveForm").evaluate((form) => ({ task: form.elements.calculationType.value, stock: form.elements.stockConcentration.value, overage: form.elements.dilutionOveragePercent.value }));
+  if (migratedDilutionValues.task !== "dilution" || migratedDilutionValues.stock !== "42" || migratedDilutionValues.overage !== "7") throw new Error(`Legacy basic recipe without a task was not migrated to stock dilution: ${JSON.stringify(migratedDilutionValues)}`);
+  await page.locator("[data-liquid-library-select]").selectOption(legacyRecipeIds[1]);
+  await page.locator('[data-liquid-action="load-preset"]').click();
+  if ((await page.locator('#liquidActiveForm [name="calculationType"]').inputValue()) !== "solid" || (await page.locator('#liquidActiveForm [name="solidKind"]').inputValue()) !== "mass" || (await page.locator('#liquidActiveForm [name="solidTargetConcentration"]').inputValue()) !== "3" || (await page.locator('#liquidActiveForm [name="solidOveragePercent"]').inputValue()) !== "8") throw new Error("Legacy weighed-material recipe was not migrated to the new field names.");
 
   await page.locator('#liquidModuleTabs [data-liquid-module="serial"]').click();
   await page.locator('#liquidActiveForm [name="strategy"]').selectOption("serial");
@@ -475,12 +566,14 @@ try {
   const pageWidths = await page.evaluate(() => ({ viewport: document.documentElement.clientWidth, page: document.documentElement.scrollWidth }));
   if (pageWidths.page > pageWidths.viewport + 1) throw new Error(`Mobile page overflowed horizontally: ${JSON.stringify(pageWidths)}`);
   await page.screenshot({ path: resolve(outputDirectory, "05-mobile-24-well.png"), fullPage: true });
-  await page.locator('.liquid-module-launch[data-liquid-module="transfection"]').click();
+  await page.locator('.liquid-module-launch[data-liquid-module="basic"]').click();
+  await page.locator('#liquidActiveForm [name="calculationType"]').selectOption("fixed");
   const mobileDrawerWidths = await page.locator("#liquidDrawer").evaluate((drawer) => ({ client: drawer.clientWidth, scroll: drawer.scrollWidth }));
   if (mobileDrawerWidths.scroll > mobileDrawerWidths.client + 1) {
     throw new Error(`Mobile liquid drawer overflowed horizontally: ${JSON.stringify(mobileDrawerWidths)}`);
   }
-  if (!(await page.locator(".liquid-scope-help").isVisible())) throw new Error("Mobile liquid drawer hid the plate-scope guidance.");
+  if (await page.locator(".liquid-scope-help:visible").count() !== 1) throw new Error("Mobile liquid drawer hid the plate-scope guidance.");
+  if (!(await page.locator("[data-fixed-reagent-row]").first().isVisible())) throw new Error("Mobile liquid drawer hid the fixed-ratio reagent editor.");
   await page.screenshot({ path: resolve(outputDirectory, "05b-mobile-liquid-drawer.png"), fullPage: true });
   await page.locator("#closeLiquidDrawerButton").click();
 

@@ -65,6 +65,72 @@
     };
   }
 
+  function calculateFixedRatioPreparation(options) {
+    const meaning = options.meaning === "final" ? "final" : "extra";
+    const volumeMode = options.volumeMode === "total" ? "total" : "per-well";
+    const requestedVolumeUL = volumeToUL(options.baseVolume, options.baseUnit || "µL");
+    if (requestedVolumeUL <= 0) throw new Error("Requested volume must be greater than zero.");
+    const wellCount = volumeMode === "per-well" ? finite(options.wellCount, "well count", { min: 1, allowZero: false }) : 1;
+    const overagePercent = finite(options.overagePercent ?? 10, "overage", { min: 0 });
+    const equivalentWells = volumeMode === "per-well" ? withOverage(wellCount, overagePercent) : withOverage(1, overagePercent);
+    const reagents = (options.reagents || []).map((reagent, index) => {
+      const name = String(reagent.name || "").trim();
+      if (!name) throw new Error(`Reagent ${index + 1} needs a name.`);
+      const referenceVolumeUL = volumeToUL(reagent.referenceVolume, reagent.referenceUnit || "µL");
+      const reagentVolumeUL = volumeToUL(reagent.reagentVolume, reagent.reagentUnit || "µL");
+      if (referenceVolumeUL <= 0 || reagentVolumeUL <= 0) throw new Error(`Reagent ${index + 1} ratio volumes must be greater than zero.`);
+      return { name, fraction: reagentVolumeUL / referenceVolumeUL, normalizedRatio: referenceVolumeUL / reagentVolumeUL };
+    });
+    if (!reagents.length) throw new Error("At least one reagent is required.");
+    const totalFraction = reagents.reduce((sum, reagent) => sum + reagent.fraction, 0);
+    if (meaning === "final" && totalFraction >= 1) throw new Error("The total reagent fraction must be less than 100% of the final mixture.");
+
+    const theoreticalReagents = reagents.map((reagent) => ({ ...reagent, volumeUL: requestedVolumeUL * reagent.fraction }));
+    const theoreticalMediumUL = meaning === "extra" ? requestedVolumeUL : requestedVolumeUL * (1 - totalFraction);
+    const theoreticalFinalUL = meaning === "extra" ? requestedVolumeUL * (1 + totalFraction) : requestedVolumeUL;
+    const scale = equivalentWells;
+    const rawBatchReagents = theoreticalReagents.map((reagent) => ({ ...reagent, volumeUL: reagent.volumeUL * scale }));
+    let batchMediumUL = theoreticalMediumUL * scale;
+    const batchFinalUL = theoreticalFinalUL * scale;
+    const minimum = volumeToUL(options.minimumPipetteVolume ?? 1, options.minimumPipetteUnit || "µL");
+    const workingSolutions = [];
+    const batchReagents = rawBatchReagents.map((reagent) => {
+      if (!(reagent.volumeUL > 0 && reagent.volumeUL < minimum)) return reagent;
+      const dilutionFactor = Math.max(2, Math.ceil(minimum / reagent.volumeUL));
+      const applied = options.applyWorkingSolutions === true;
+      const transferVolumeUL = reagent.volumeUL * dilutionFactor;
+      const transferredDiluentUL = reagent.volumeUL * (dilutionFactor - 1);
+      const stockForWorkingSolutionUL = minimum;
+      const diluentForWorkingSolutionUL = minimum * (dilutionFactor - 1);
+      workingSolutions.push({ name: reagent.name, dilutionFactor, originalVolumeUL: round(reagent.volumeUL), transferVolumeUL: round(transferVolumeUL), stockForWorkingSolutionUL: round(stockForWorkingSolutionUL), diluentForWorkingSolutionUL: round(diluentForWorkingSolutionUL), preparedWorkingSolutionUL: round(stockForWorkingSolutionUL + diluentForWorkingSolutionUL), applied });
+      if (applied) {
+        batchMediumUL -= transferredDiluentUL;
+        return { ...reagent, name: `${reagent.name} working solution`, volumeUL: transferVolumeUL, originalReagentVolumeUL: reagent.volumeUL };
+      }
+      return reagent;
+    });
+    if (batchMediumUL < -1e-9) throw new Error("The confirmed working solution requires more diluent than the available medium volume.");
+
+    const nameCounts = new Map();
+    reagents.forEach((reagent) => nameCounts.set(reagent.name.toLowerCase(), (nameCounts.get(reagent.name.toLowerCase()) || 0) + 1));
+    const warnings = [...nameCounts].filter(([, count]) => count > 1).map(([name]) => ({ code: "duplicate-name", name }));
+    workingSolutions.forEach((working) => warnings.push({ code: "small-volume", name: working.name, volumeUL: working.originalVolumeUL, dilutionFactor: working.dilutionFactor, applied: working.applied }));
+
+    const theoretical = {
+      mediumVolumeUL: round(theoreticalMediumUL),
+      reagents: theoreticalReagents.map((reagent) => ({ ...reagent, volumeUL: round(reagent.volumeUL) })),
+      finalVolumeUL: round(theoreticalFinalUL),
+    };
+    const batch = {
+      mediumVolumeUL: round(Math.max(0, batchMediumUL)),
+      reagents: batchReagents.map((reagent) => ({ ...reagent, volumeUL: round(reagent.volumeUL) })),
+      finalVolumeUL: round(batchFinalUL),
+    };
+    const componentSum = batch.mediumVolumeUL + batch.reagents.reduce((sum, reagent) => sum + reagent.volumeUL, 0);
+    if (Math.abs(componentSum - batch.finalVolumeUL) > 0.01) throw new Error("Component volumes do not sum to the reported final volume.");
+    return { meaning, volumeMode, requestedVolumeUL: round(requestedVolumeUL), wellCount, equivalentWells: round(equivalentWells), overagePercent, theoretical, batch, workingSolutions, warnings };
+  }
+
   function calculateSolutionMass(options) {
     const kind = options.kind || "mass";
     const preparedVolumeUL = withOverage(volumeToUL(options.totalVolume, options.volumeUnit || "mL"), options.overagePercent ?? 10);
@@ -474,6 +540,7 @@
     concentrationToBase,
     withOverage,
     calculateDilution,
+    calculateFixedRatioPreparation,
     calculateSolutionMass,
     calculateCargoPerWell,
     calculateGenericTransfection,

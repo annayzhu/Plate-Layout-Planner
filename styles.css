@@ -24,6 +24,7 @@
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
 html { min-width: 320px; scroll-behavior: smooth; }
 body {
@@ -40,11 +41,11 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-button, input, select { color: inherit; font: inherit; }
+button, input, select, textarea { color: inherit; font: inherit; }
 button { cursor: pointer; }
 button:active:not(:disabled), .file-button:active { transform: translateY(1px) scale(.99); }
 button:disabled { cursor: not-allowed; opacity: .42; }
-input, select {
+input, select, textarea {
   width: 100%;
   min-height: 40px;
   padding: 8px 10px;
@@ -54,7 +55,7 @@ input, select {
   background: var(--surface-strong);
   transition: border-color 140ms ease, box-shadow 140ms ease;
 }
-input:focus, select:focus {
+input:focus, select:focus, textarea:focus {
   border-color: var(--pine);
   box-shadow: 0 0 0 3px rgba(23, 77, 76, .12);
 }
@@ -420,6 +421,73 @@ label > span { display: block; margin-bottom: 5px; color: var(--muted); font-siz
 .calculation-output-actions .calculation-output-delete { color: var(--danger); }
 .calculation-output-actions .calculation-output-delete.confirming { width: auto; padding: 0 7px; border-color: var(--danger); background: var(--danger); color: #fff; font-size: 8px; font-weight: 800; }
 
+.liquid-card { padding: clamp(16px, 2vw, 24px); }
+.liquid-card-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
+.liquid-card-heading h2, .liquid-drawer-header h2 { margin: 2px 0 0; font-size: 18px; letter-spacing: -.025em; }
+.liquid-card-heading p, .liquid-drawer-header p { margin: 4px 0 0; color: var(--muted); font-size: 9px; line-height: 1.5; }
+.eyebrow { display: block; color: var(--pine); font-size: 7px; font-weight: 850; letter-spacing: .16em; }
+.liquid-scope-badge { flex: 0 0 auto; padding: 5px 8px; border: 1px solid #bdd4cf; border-radius: 999px; background: var(--pine-soft); color: var(--pine); font-size: 8px; font-weight: 800; }
+.liquid-module-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin-top: 14px; }
+.liquid-module-launch { display: grid; grid-template-columns: 24px minmax(0,1fr); gap: 0 7px; align-items: center; min-width: 0; padding: 9px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-soft); text-align: left; transition: border-color 140ms ease, background 140ms ease, transform 140ms ease; }
+.liquid-module-launch:hover { border-color: var(--pine); background: var(--pine-soft); transform: translateY(-1px); }
+.liquid-module-launch > span { grid-row: 1 / 3; display: grid; width: 24px; height: 24px; place-items: center; border-radius: 7px; background: #fff; color: var(--pine); font-size: 7px; font-weight: 850; }
+.liquid-module-launch strong { overflow: hidden; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.liquid-module-launch small { overflow: hidden; color: var(--muted); font-size: 7px; text-overflow: ellipsis; white-space: nowrap; }
+.liquid-card-note { margin: 8px 0 0; color: var(--muted); font-size: 7px; text-align: center; }
+
+.liquid-drawer[hidden] { display: none; }
+.liquid-drawer { position: fixed; inset: 0; z-index: 100; display: grid; grid-template-columns: minmax(0,1fr) minmax(680px, 940px); }
+.liquid-drawer-backdrop { border: 0; background: rgba(12,31,29,.38); backdrop-filter: blur(3px); }
+.liquid-drawer-panel { display: grid; grid-template-rows: auto auto minmax(0,1fr); min-width: 0; height: 100vh; overflow: hidden; border-left: 1px solid rgba(255,255,255,.48); background: #f5f8f7; box-shadow: -24px 0 60px rgba(17,47,44,.2); }
+.liquid-drawer-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 20px 24px 14px; border-bottom: 1px solid var(--line); background: rgba(255,255,255,.9); }
+.liquid-close { display: grid; width: 34px; height: 34px; place-items: center; padding: 0; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-strong); color: var(--muted); font-size: 20px; line-height: 1; }
+.liquid-close:hover { border-color: var(--pine); color: var(--pine); }
+.liquid-module-tabs { display: flex; gap: 5px; padding: 10px 24px; overflow-x: auto; border-bottom: 1px solid var(--line); background: rgba(255,255,255,.76); }
+.liquid-module-tabs button { flex: 0 0 auto; min-height: 31px; padding: 5px 11px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-strong); color: var(--ink-soft); font-size: 9px; font-weight: 780; }
+.liquid-module-tabs button.active { border-color: var(--pine); background: var(--pine); color: #fff; }
+.liquid-drawer-content { overflow: auto; padding: 18px 24px 32px; }
+.liquid-recipe-library { display: grid; grid-template-columns: minmax(160px,1fr) minmax(180px,1fr) auto; gap: 10px; align-items: center; margin-bottom: 12px; padding: 11px 13px; border: 1px solid var(--line); border-radius: 11px; background: #fff; }
+.liquid-recipe-library > div:first-child { display: grid; gap: 2px; }
+.liquid-recipe-library strong { font-size: 9px; }
+.liquid-recipe-library small { color: var(--muted); font-size: 7px; }
+.liquid-recipe-library select { min-width: 0; min-height: 33px; padding: 5px 8px; border-radius: 8px; font-size: 9px; }
+.liquid-library-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 5px; }
+.liquid-library-actions button, .liquid-library-actions .file-button { min-height: 31px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface-strong); color: var(--ink-soft); font-size: 8px; font-weight: 750; }
+.liquid-workspace { display: grid; grid-template-columns: minmax(300px,.86fr) minmax(360px,1.14fr); gap: 14px; align-items: start; }
+.liquid-form-card, .liquid-result-card { min-width: 0; padding: 16px; border: 1px solid var(--line); border-radius: 13px; background: var(--surface-strong); box-shadow: var(--shadow-soft); }
+.liquid-form-card h3, .liquid-result-card h3 { margin: 0; font-size: 14px; letter-spacing: -.015em; }
+.liquid-form-card > p, .liquid-result-card > p { margin: 4px 0 13px; color: var(--muted); font-size: 8px; line-height: 1.5; }
+.liquid-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
+.liquid-form-grid label { display: grid; align-content: start; gap: 4px; min-width: 0; color: var(--ink-soft); font-size: 8px; font-weight: 760; }
+.liquid-form-grid label.wide { grid-column: 1 / -1; }
+.liquid-form-grid input, .liquid-form-grid select { min-height: 35px; padding: 6px 8px; border-radius: 8px; font-size: 10px; }
+.liquid-scope-field input[readonly] { border-color: #b9cec9; background: #edf4f2; color: var(--pine); cursor: not-allowed; font-weight: 850; }
+.liquid-scope-help { display: block; color: #8a5a2f; font-size: 7px; font-weight: 700; line-height: 1.45; }
+.liquid-form-grid textarea { width: 100%; min-height: 96px; padding: 8px; resize: vertical; border: 1px solid var(--line); border-radius: 8px; outline: 0; background: var(--surface-strong); font-size: 10px; line-height: 1.5; }
+.liquid-inline-input { display: grid; grid-template-columns: minmax(0,1fr) 72px; gap: 5px; }
+.liquid-action-row { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 13px; }
+.liquid-action-row .primary-button, .liquid-action-row .secondary-button { min-height: 34px; padding: 6px 11px; font-size: 9px; }
+.liquid-result-empty { padding: 34px 16px; border: 1px dashed var(--line-strong); border-radius: 11px; color: var(--muted); font-size: 9px; line-height: 1.6; text-align: center; }
+.liquid-result-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.liquid-result-meta span { padding: 4px 7px; border-radius: 7px; background: var(--pine-soft); color: var(--pine); font-size: 8px; font-weight: 780; }
+.liquid-table-wrap { max-width: 100%; overflow: auto; border: 1px solid var(--line); border-radius: 10px; }
+.liquid-table { width: 100%; border-collapse: collapse; font-size: 8px; white-space: nowrap; }
+.liquid-table th, .liquid-table td { padding: 7px 8px; border-bottom: 1px solid var(--line); text-align: left; }
+.liquid-table th { position: sticky; top: 0; background: #e8f1ef; color: var(--pine); font-weight: 850; }
+.liquid-table tr:last-child td { border-bottom: 0; }
+.liquid-warning-list { display: grid; gap: 5px; margin-top: 10px; }
+.liquid-warning { padding: 7px 8px; border: 1px solid #e2caca; border-radius: 8px; background: var(--danger-soft); color: #824545; font-size: 8px; line-height: 1.45; }
+.liquid-checklist { margin: 11px 0 0; padding: 0; list-style: none; counter-reset: liquid-step; }
+.liquid-checklist li { position: relative; padding: 7px 8px 7px 30px; border-top: 1px solid var(--line); color: var(--ink-soft); font-size: 8px; line-height: 1.45; counter-increment: liquid-step; }
+.liquid-checklist li::before { position: absolute; top: 7px; left: 6px; display: grid; width: 17px; height: 17px; place-items: center; border-radius: 50%; background: var(--pine-soft); color: var(--pine); content: counter(liquid-step); font-size: 7px; font-weight: 850; }
+.liquid-subsection { grid-column: 1 / -1; margin-top: 3px; padding-top: 9px; border-top: 1px solid var(--line); }
+.liquid-subsection strong { display: block; margin-bottom: 7px; font-size: 9px; }
+.liquid-subsection > span { display: block; color: var(--muted); font-size: 8px; line-height: 1.5; }
+.liquid-layout-preview { display: grid; grid-template-columns: repeat(var(--preview-columns, 6), minmax(30px,1fr)); gap: 4px; margin-top: 11px; }
+.liquid-preview-well { min-width: 0; padding: 6px 3px; border: 1px solid #bad0cb; border-radius: 7px; background: var(--pine-soft); color: var(--pine); font-size: 7px; line-height: 1.25; text-align: center; }
+.liquid-preview-well strong, .liquid-preview-well small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.liquid-preview-well small { margin-top: 2px; color: var(--ink-soft); font-size: 6px; }
+
 .export-card { display: flex; align-items: center; justify-content: space-between; gap: 30px; margin-top: 15px; padding: 24px 28px; }
 .export-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 7px; }
 .file-button { display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
@@ -448,6 +516,11 @@ footer { display: flex; justify-content: space-between; gap: 20px; padding: 18px
   .plate-heading-tools { grid-template-columns: minmax(0,1fr) auto; }
   .plate-heading-tools > .selection-actions { grid-column: 1 / -1; }
   .color-control { max-width: 270px; }
+}
+
+@media (max-width: 760px) {
+  .liquid-recipe-library { grid-template-columns: 1fr; }
+  .liquid-library-actions { justify-content: flex-start; }
 }
 
 @media (max-width: 760px) {
@@ -487,14 +560,34 @@ footer { display: flex; justify-content: space-between; gap: 20px; padding: 18px
   .summary-parameter-grid { grid-template-columns: 1fr; }
   .export-actions { justify-content: flex-start; }
   footer { flex-direction: column; gap: 4px; }
+  .liquid-module-grid { grid-template-columns: 1fr; }
+  .liquid-drawer { grid-template-columns: 1fr; }
+  .liquid-drawer-backdrop { display: none; }
+  .liquid-drawer-panel { width: 100%; border-left: 0; }
+  .liquid-drawer-header, .liquid-module-tabs, .liquid-drawer-content { padding-left: 14px; padding-right: 14px; }
+  .liquid-workspace { grid-template-columns: 1fr; }
+  .liquid-form-grid { grid-template-columns: 1fr; }
+  .liquid-form-grid label.wide, .liquid-subsection { grid-column: 1; }
 }
 
 @media print {
   body { background: #fdfefe; }
-  .topbar, .hero, .side-stack, .export-card, footer, .toast, .plate-heading-tools { display: none !important; }
+  .topbar, .hero, .side-stack, .export-card, footer, .toast, .plate-heading-tools, .liquid-drawer { display: none !important; }
   .page-shell { width: 100%; padding: 0; }
   .workspace-grid { display: block; margin: 0; }
   .plate-card { border: 0; box-shadow: none; }
   .plate-scroll { overflow: visible; }
   .plate-canvas { transform-origin: top left; }
+  body.liquid-printing .page-shell { display: none !important; }
+  body.liquid-printing .liquid-drawer { position: static; display: block !important; }
+  body.liquid-printing .liquid-drawer-panel { display: block; height: auto; border: 0; box-shadow: none; }
+  body.liquid-printing .liquid-drawer-backdrop,
+  body.liquid-printing .liquid-drawer-header,
+  body.liquid-printing .liquid-module-tabs,
+  body.liquid-printing .liquid-recipe-library,
+  body.liquid-printing .liquid-form-card,
+  body.liquid-printing .liquid-action-row { display: none !important; }
+  body.liquid-printing .liquid-drawer-content { overflow: visible; padding: 0; }
+  body.liquid-printing .liquid-workspace { display: block; }
+  body.liquid-printing .liquid-result-card { border: 0; box-shadow: none; }
 }

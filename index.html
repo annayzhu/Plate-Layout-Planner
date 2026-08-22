@@ -6,7 +6,7 @@
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
     <meta name="description" content="纯浏览器本地运行的 6、12、24、96、384 孔板布局、标签与批量计算工具。" />
     <title>Plate Layout Planner · 孔板布局规划工具</title>
-    <link rel="stylesheet" href="styles.css?v=20260819-13" />
+    <link rel="stylesheet" href="styles.css?v=20260820-2" />
   </head>
   <body>
     <header class="topbar">
@@ -77,7 +77,8 @@
                   <button id="exportCsvButton" class="secondary-button" type="button">CSV</button>
                   <button id="exportSvgButton" class="secondary-button" type="button">SVG</button>
                   <button id="exportJsonButton" class="primary-button" type="button" data-i18n="backup">备份</button>
-                  <label id="importJsonLabel" class="secondary-button file-button"><span data-i18n="import">导入</span><input id="importJsonInput" type="file" accept="application/json,.json" hidden /></label>
+                  <button id="excelTemplateButton" class="secondary-button" type="button" data-i18n="excelTemplate">Excel 模板</button>
+                  <label id="importJsonLabel" class="secondary-button file-button"><span data-i18n="import">导入表格</span><input id="importJsonInput" type="file" accept=".csv,.tsv,.json,text/csv,text/tab-separated-values,application/json" hidden /></label>
                   <button id="confirmImportButton" class="secondary-button inline-confirm-button" type="button" hidden>确认导入</button>
                   <button id="printButton" class="text-button" type="button" data-i18n="print">打印 / PDF</button>
                 </div>
@@ -146,7 +147,26 @@
             </div>
           </details>
 
-          <details class="card calculation-card collapsible-card" open>
+          <section class="card liquid-card" aria-labelledby="liquidCalculationTitle">
+            <div class="liquid-card-heading">
+              <div>
+                <span class="eyebrow">LIQUID PREPARATION</span>
+                <h2 id="liquidCalculationTitle" data-i18n="liquidTitle">配液计算</h2>
+                <p data-i18n="liquidBody">从当前孔板取孔数，完成常规配液、转染、梯度稀释和药物排板。</p>
+              </div>
+              <span id="liquidScopeBadge" class="liquid-scope-badge">整板 · 24 孔</span>
+            </div>
+            <div class="liquid-module-grid">
+              <button class="liquid-module-launch" type="button" data-liquid-module="basic"><span>01</span><strong>基础常规配液</strong><small>C1V1 与目标浓度配液</small></button>
+              <button class="liquid-module-launch" type="button" data-liquid-module="transfection"><span>02</span><strong>转染体系配液</strong><small>siRNA、质粒与多管 Mix</small></button>
+              <button class="liquid-module-launch" type="button" data-liquid-module="serial"><span>03</span><strong>连续梯度稀释</strong><small>直接或逐级稀释</small></button>
+              <button class="liquid-module-launch" type="button" data-liquid-module="drug"><span>04</span><strong>药物浓度梯度</strong><small>配液、预览与排板</small></button>
+            </div>
+            <button id="openLiquidCalculatorButton" class="primary-button full" type="button">打开配液计算</button>
+            <p class="liquid-card-note">默认余量 10% · 最小可靠移液体积 1 µL · 结果仅保存在当前浏览器</p>
+          </section>
+
+          <details class="card calculation-card collapsible-card legacy-calculation" hidden>
             <summary class="collapsible-summary">
               <div>
                 <h2 data-i18n="calculationTitle">条件批量计算</h2>
@@ -190,8 +210,26 @@
       </footer>
     </main>
 
+    <div id="liquidDrawer" class="liquid-drawer" hidden>
+      <button class="liquid-drawer-backdrop" type="button" aria-label="关闭配液计算"></button>
+      <section class="liquid-drawer-panel" role="dialog" aria-modal="true" aria-labelledby="liquidDrawerTitle">
+        <header class="liquid-drawer-header">
+          <div><span class="eyebrow">PLATE-AWARE CALCULATOR</span><h2 id="liquidDrawerTitle">配液计算</h2><p id="liquidDrawerScope">当前板全部 24 孔</p></div>
+          <button id="closeLiquidDrawerButton" class="liquid-close" type="button" aria-label="关闭">×</button>
+        </header>
+        <nav id="liquidModuleTabs" class="liquid-module-tabs" aria-label="配液模块">
+          <button type="button" data-liquid-module="basic">基础配液</button>
+          <button type="button" data-liquid-module="transfection">转染体系</button>
+          <button type="button" data-liquid-module="serial">梯度稀释</button>
+          <button type="button" data-liquid-module="drug">药物排板</button>
+        </nav>
+        <div id="liquidDrawerContent" class="liquid-drawer-content"></div>
+      </section>
+    </div>
+
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
     <script src="core.js?v=20260819-7"></script>
-    <script src="app.js?v=20260819-7"></script>
+    <script src="liquid-core.js?v=20260820-2"></script>
+    <script src="app.js?v=20260820-4"></script>
   </body>
 </html>

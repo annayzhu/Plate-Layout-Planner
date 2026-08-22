@@ -36,6 +36,33 @@
         </div>
       </section>
 
+      <section class="workspace-command card" aria-label="多板项目工作区">
+        <label class="workspace-name-field">
+          <span id="workspaceNameLabel">项目名称</span>
+          <input id="workspaceName" type="text" maxlength="80" value="未命名项目" />
+        </label>
+        <div class="plate-tab-region">
+          <div id="plateTabs" class="plate-tabs" role="tablist" aria-label="项目孔板"></div>
+        </div>
+        <div class="workspace-actions">
+          <button id="addPlateButton" class="primary-button compact-button" type="button">＋ 新建板</button>
+          <button id="duplicatePlateButton" class="secondary-button compact-button" type="button">复制整板</button>
+          <button id="copyStructureButton" class="secondary-button compact-button" type="button">仅复制参数</button>
+          <button id="movePlateLeftButton" class="icon-action" type="button" aria-label="孔板左移">←</button>
+          <button id="movePlateRightButton" class="icon-action" type="button" aria-label="孔板右移">→</button>
+          <button id="deletePlateButton" class="icon-action danger-action" type="button" aria-label="删除当前孔板">×</button>
+          <button id="overviewToggleButton" class="secondary-button compact-button" type="button">全部板概览</button>
+        </div>
+      </section>
+
+      <section id="plateOverview" class="card plate-overview" hidden aria-labelledby="plateOverviewTitle">
+        <div class="plate-overview-heading">
+          <div><span class="eyebrow">PROJECT OVERVIEW</span><h2 id="plateOverviewTitle">全部板概览</h2><p id="plateOverviewDescription">点击任意缩略孔板进入精细编辑。</p></div>
+          <label class="overview-color-control"><span id="overviewColorLabel">统一按参数着色</span><select id="overviewColorDimension"></select></label>
+        </div>
+        <div id="plateOverviewGrid" class="plate-overview-grid"></div>
+      </section>
+
       <div class="workspace-grid">
         <section class="plate-card card">
           <div class="plate-card-heading">
@@ -77,8 +104,10 @@
                   <button id="exportCsvButton" class="secondary-button" type="button">CSV</button>
                   <button id="exportSvgButton" class="secondary-button" type="button">SVG</button>
                   <button id="exportJsonButton" class="primary-button" type="button" data-i18n="backup">备份</button>
+                  <button id="exportXlsxButton" class="secondary-button" type="button">XLSX</button>
                   <button id="excelTemplateButton" class="secondary-button" type="button" data-i18n="excelTemplate">Excel 模板</button>
-                  <label id="importJsonLabel" class="secondary-button file-button"><span data-i18n="import">导入表格</span><input id="importJsonInput" type="file" accept=".csv,.tsv,.json,text/csv,text/tab-separated-values,application/json" hidden /></label>
+                  <label id="importJsonLabel" class="secondary-button file-button"><span data-i18n="import">导入表格</span><input id="importJsonInput" type="file" accept=".xlsx,.csv,.tsv,.json,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv,text/tab-separated-values,application/json" hidden /></label>
+                  <select id="importModeSelect" class="compact-import-mode" hidden aria-label="导入方式"><option value="add">新增孔板</option><option value="replace">覆盖当前板</option></select>
                   <button id="confirmImportButton" class="secondary-button inline-confirm-button" type="button" hidden>确认导入</button>
                   <button id="printButton" class="text-button" type="button" data-i18n="print">打印 / PDF</button>
                 </div>
@@ -164,6 +193,21 @@
             </div>
             <button id="openLiquidCalculatorButton" class="primary-button full" type="button">打开配液计算</button>
             <p class="liquid-card-note">默认余量 10% · 最小可靠移液体积 1 µL · 结果仅保存在当前浏览器</p>
+            <section class="project-liquid-panel" aria-labelledby="projectLiquidTitle">
+              <div class="project-liquid-heading">
+                <div>
+                  <h3 id="projectLiquidTitle">跨板配液汇总</h3>
+                  <p>合并相同配方的基础需求量，再统一加入一次余量。</p>
+                </div>
+                <label class="project-liquid-overage"><span>统一余量</span><span><input id="projectLiquidOverage" type="number" min="0" max="100" step="0.1" value="10" />%</span></label>
+              </div>
+              <div class="project-liquid-controls">
+                <label><span>汇总范围</span><select id="projectLiquidScope"><option value="current">当前板</option><option value="checked">勾选板</option><option value="all">全部板</option></select></label>
+                <button id="projectLiquidSummaryButton" class="secondary-button" type="button">生成汇总</button>
+              </div>
+              <div id="projectLiquidPlatePicker" class="project-liquid-plate-picker" hidden></div>
+              <div id="projectLiquidSummary" class="project-liquid-summary" aria-live="polite"></div>
+            </section>
           </section>
 
           <details class="card calculation-card collapsible-card legacy-calculation" hidden>
@@ -230,6 +274,8 @@
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
     <script src="core.js?v=20260819-7"></script>
     <script src="liquid-core.js?v=20260820-2"></script>
-    <script src="app.js?v=20260820-4"></script>
+    <script src="workspace-core.js?v=20260822-1"></script>
+    <script src="xlsx-core.js?v=20260822-1"></script>
+    <script src="app.js?v=20260822-5"></script>
   </body>
 </html>

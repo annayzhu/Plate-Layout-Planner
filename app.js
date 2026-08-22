@@ -5,8 +5,15 @@
   if (!Core) throw new Error("PlateCore failed to load.");
   const Liquid = window.LiquidCore;
   if (!Liquid) throw new Error("LiquidCore failed to load.");
+  const Workspace = window.WorkspaceCore;
+  if (!Workspace) throw new Error("WorkspaceCore failed to load.");
+  const Xlsx = window.XlsxCore;
+  if (!Xlsx) throw new Error("XlsxCore failed to load.");
 
   const STORAGE_KEY = "plate-layout-studio:project:v1";
+  const WORKSPACE_STORAGE_KEY = "plate-layout-studio:workspace:v2";
+  const WORKSPACE_DB_NAME = "plate-layout-studio";
+  const WORKSPACE_DB_STORE = "workspaces";
   const LANGUAGE_KEY = "plate-layout-studio:language";
   const RECIPE_LIBRARY_KEY = "plate-layout-studio:liquid-recipes:v1";
   const BUILTIN_LIQUID_RECIPES = Object.freeze([
@@ -91,16 +98,19 @@
       "calcSource", "calcOperation", "operandMode", "constantOperandWrap", "constantOperand",
       "parameterOperandWrap", "parameterOperand", "calcOutputName", "calcPrecision",
       "calculationGuide", "runCalculationButton", "calculationResult", "calculationOutputCount", "calculationOutputList", "exportCsvButton", "exportSvgButton",
-      "exportJsonButton", "excelTemplateButton", "importJsonLabel", "importJsonInput", "confirmImportButton", "printButton",
-      "liquidScopeBadge", "openLiquidCalculatorButton", "liquidDrawer", "closeLiquidDrawerButton", "liquidDrawerScope", "liquidModuleTabs", "liquidDrawerContent", "toast",
+      "exportJsonButton", "excelTemplateButton", "importJsonLabel", "importJsonInput", "importModeSelect", "confirmImportButton", "printButton",
+      "workspaceName", "workspaceNameLabel", "plateTabs", "addPlateButton", "duplicatePlateButton", "copyStructureButton", "movePlateLeftButton", "movePlateRightButton", "deletePlateButton", "overviewToggleButton", "plateOverview", "plateOverviewTitle", "plateOverviewDescription", "overviewColorLabel", "overviewColorDimension", "plateOverviewGrid", "exportXlsxButton",
+      "liquidScopeBadge", "openLiquidCalculatorButton", "projectLiquidScope", "projectLiquidOverage", "projectLiquidSummaryButton", "projectLiquidPlatePicker", "projectLiquidSummary", "liquidDrawer", "closeLiquidDrawerButton", "liquidDrawerScope", "liquidModuleTabs", "liquidDrawerContent", "toast",
     ].map((id) => [id, document.getElementById(id)]),
   );
 
-  let project = loadProject();
+  let workspace = loadWorkspace();
+  let project = Workspace.activePlate(workspace);
   let selection = new Set();
   let selectionAnchor = null;
-  let undoStack = [];
-  let redoStack = [];
+  const plateHistories = new Map();
+  let workspaceUndoStack = [];
+  let workspaceRedoStack = [];
   let pointerSession = null;
   let toastTimer = null;
   let clearConfirmationTimer = null;
@@ -111,6 +121,10 @@
   let pendingBatchPaste = null;
   let calculationDeleteTimer = null;
   let pendingCalculationDeleteId = null;
+  let plateDeleteTimer = null;
+  let overviewOpen = false;
+  let overviewColorName = "";
+  let indexedSaveTimer = null;
   let activeLiquidModule = "basic";
   let lastLiquidResult = null;
   let pendingDrugLayout = null;
@@ -271,19 +285,82 @@
     return normalized;
   }
 
-  function loadProject() {
+  function loadWorkspace() {
     try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      return stored ? normalizeProject(JSON.parse(stored)) : defaultProject();
+      const storedWorkspace = localStorage.getItem(WORKSPACE_STORAGE_KEY);
+      if (storedWorkspace) return Workspace.normalizeWorkspace(JSON.parse(storedWorkspace));
+      const storedLegacy = localStorage.getItem(STORAGE_KEY);
+      return storedLegacy ? Workspace.normalizeWorkspace(JSON.parse(storedLegacy)) : Workspace.createWorkspace();
     } catch (error) {
-      console.warn("Could not restore saved project:", error);
-      return defaultProject();
+      console.warn("Could not restore saved workspace:", error);
+      return Workspace.createWorkspace();
+    }
+  }
+
+  function openWorkspaceDb() {
+    return new Promise((resolve, reject) => {
+      if (!window.indexedDB) { resolve(null); return; }
+      const request = indexedDB.open(WORKSPACE_DB_NAME, 1);
+      request.onupgradeneeded = () => {
+        const db = request.result;
+        if (!db.objectStoreNames.contains(WORKSPACE_DB_STORE)) db.createObjectStore(WORKSPACE_DB_STORE);
+      };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async function writeWorkspaceToIndexedDb() {
+    try {
+      const db = await openWorkspaceDb();
+      if (!db) return;
+      await new Promise((resolve, reject) => {
+        const transaction = db.transaction(WORKSPACE_DB_STORE, "readwrite");
+        transaction.objectStore(WORKSPACE_DB_STORE).put(workspace, "active");
+        transaction.oncomplete = resolve;
+        transaction.onerror = () => reject(transaction.error);
+      });
+      db.close();
+    } catch (error) {
+      console.error("IndexedDB save failed:", error);
+      showToast(bilingual("自动保存失败，请立即导出 JSON 备份", "Autosave failed. Export a JSON backup now."));
+    }
+  }
+
+  async function initializeIndexedStorage() {
+    try {
+      const db = await openWorkspaceDb();
+      if (!db) return;
+      const stored = await new Promise((resolve, reject) => {
+        const request = db.transaction(WORKSPACE_DB_STORE, "readonly").objectStore(WORKSPACE_DB_STORE).get("active");
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      db.close();
+      if (stored && new Date(stored.updatedAt || 0) > new Date(workspace.updatedAt || 0)) {
+        workspace = Workspace.normalizeWorkspace(stored);
+        project = Workspace.activePlate(workspace);
+        selection = new Set();
+        selectionAnchor = null;
+        renderAll();
+      } else {
+        writeWorkspaceToIndexedDb();
+      }
+    } catch (error) {
+      console.warn("IndexedDB restore failed:", error);
     }
   }
 
   function saveProject() {
     project.updatedAt = new Date().toISOString();
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(project));
+    workspace.updatedAt = project.updatedAt;
+    try {
+      localStorage.setItem(WORKSPACE_STORAGE_KEY, JSON.stringify(workspace));
+    } catch (error) {
+      console.warn("Workspace mirror exceeded localStorage capacity:", error);
+    }
+    window.clearTimeout(indexedSaveTimer);
+    indexedSaveTimer = window.setTimeout(writeWorkspaceToIndexedDb, 80);
     elements.saveStatus.textContent = t("autosaved");
   }
 
@@ -291,10 +368,23 @@
     return JSON.stringify(project);
   }
 
+  function historyFor(plateId = project.id) {
+    if (!plateHistories.has(plateId)) plateHistories.set(plateId, { undo: [], redo: [] });
+    return plateHistories.get(plateId);
+  }
+
+  function restoreActivePlate(raw) {
+    const restored = Workspace.normalizeWorkspace({ version: 2, name: workspace.name, activePlateId: raw.id, plates: [raw] }).plates[0];
+    const index = workspace.plates.findIndex((plate) => plate.id === project.id);
+    workspace.plates[index] = restored;
+    project = restored;
+  }
+
   function commit(mutator, { invalidateLiquid = true } = {}) {
-    undoStack.push(snapshot());
-    if (undoStack.length > MAX_HISTORY) undoStack.shift();
-    redoStack = [];
+    const history = historyFor();
+    history.undo.push(snapshot());
+    if (history.undo.length > MAX_HISTORY) history.undo.shift();
+    history.redo = [];
     mutator();
     if (invalidateLiquid) project.liquidPlans = (project.liquidPlans || []).map((item) => ({ ...item, stale: true }));
     saveProject();
@@ -302,9 +392,21 @@
   }
 
   function undo() {
-    if (!undoStack.length) return;
-    redoStack.push(snapshot());
-    project = normalizeProject(JSON.parse(undoStack.pop()));
+    const history = historyFor();
+    if (!history.undo.length) {
+      if (!workspaceUndoStack.length) return;
+      workspaceRedoStack.push(structureSnapshot());
+      workspace = Workspace.normalizeWorkspace(JSON.parse(workspaceUndoStack.pop()));
+      project = Workspace.activePlate(workspace);
+      selection = new Set();
+      selectionAnchor = null;
+      saveProject();
+      renderAll();
+      showToast(t("undoDone"));
+      return;
+    }
+    history.redo.push(snapshot());
+    restoreActivePlate(JSON.parse(history.undo.pop()));
     selection = new Set();
     selectionAnchor = null;
     saveProject();
@@ -313,14 +415,42 @@
   }
 
   function redo() {
-    if (!redoStack.length) return;
-    undoStack.push(snapshot());
-    project = normalizeProject(JSON.parse(redoStack.pop()));
+    const history = historyFor();
+    if (!history.redo.length) {
+      if (!workspaceRedoStack.length) return;
+      workspaceUndoStack.push(structureSnapshot());
+      workspace = Workspace.normalizeWorkspace(JSON.parse(workspaceRedoStack.pop()));
+      project = Workspace.activePlate(workspace);
+      selection = new Set();
+      selectionAnchor = null;
+      saveProject();
+      renderAll();
+      showToast(t("redoDone"));
+      return;
+    }
+    history.undo.push(snapshot());
+    restoreActivePlate(JSON.parse(history.redo.pop()));
     selection = new Set();
     selectionAnchor = null;
     saveProject();
     renderAll();
     showToast(t("redoDone"));
+  }
+
+  function structureSnapshot() { return JSON.stringify(workspace); }
+
+  function commitWorkspace(mutator) {
+    workspaceUndoStack.push(structureSnapshot());
+    if (workspaceUndoStack.length > MAX_HISTORY) workspaceUndoStack.shift();
+    workspaceRedoStack = [];
+    plateHistories.clear();
+    mutator();
+    workspace = Workspace.normalizeWorkspace(workspace);
+    project = Workspace.activePlate(workspace);
+    selection = new Set();
+    selectionAnchor = null;
+    saveProject();
+    renderAll();
   }
 
   function currentWells() {
@@ -1021,6 +1151,105 @@
     host.innerHTML = header + table + warnings + checklist + layout + liquidResultActions() + (result.canApplyLayout ? `<div class="liquid-action-row"><button class="primary-button" data-liquid-action="${escapeHtml(applyAction)}" type="button">${escapeHtml(applyLabel)}</button></div>` : "");
   }
 
+  function liquidOveragePercent(input = {}) {
+    return Number(input.overagePercent ?? input.fixedOveragePercent ?? input.dilutionOveragePercent ?? input.solidOveragePercent ?? 0) || 0;
+  }
+
+  function stableRecipeInput(input = {}) {
+    const omitted = new Set(["wellCount", "dilutionWellCount", "overagePercent", "fixedOveragePercent", "dilutionOveragePercent", "solidOveragePercent"]);
+    return Object.fromEntries(Object.keys(input).filter((key) => !omitted.has(key)).sort().map((key) => [key, input[key]]));
+  }
+
+  function volumeFromCell(value) {
+    const match = String(value ?? "").match(/(-?\d+(?:\.\d+)?(?:e[+-]?\d+)?)\s*(nL|uL|µL|mL|L)\b/i);
+    if (!match) return null;
+    const unit = match[2] === "ul" || match[2] === "UL" ? "uL" : match[2];
+    return { value: Number(match[1]), unit };
+  }
+
+  function liquidResultContributions(result, plate) {
+    const input = result?.input || {};
+    const multiplier = 1 + liquidOveragePercent(input) / 100;
+    const groupKey = `${result.module}:${JSON.stringify(stableRecipeInput(input))}`;
+    const contributions = [];
+    const add = (component, cell, subgroup = "") => {
+      const volume = volumeFromCell(cell);
+      if (!volume || !Number.isFinite(volume.value) || volume.value < 0) return;
+      contributions.push({
+        groupKey: subgroup ? `${groupKey}:${subgroup}` : groupKey,
+        component: String(component || bilingual("未命名组分", "Unnamed component")),
+        baseVolume: volume.value / multiplier,
+        unit: volume.unit,
+        plateId: plate.id,
+        plateName: plate.name,
+      });
+    };
+    const rows = result?.rows || [];
+    if (result.module === "basic" && input.calculationType === "fixed") {
+      rows.filter((row) => /整批|Batch master mix/i.test(String(row[0])) && !/最终体系|Final mixture/i.test(String(row[1]))).forEach((row) => add(row[1], row[2]));
+    } else if (result.module === "basic" && input.calculationType !== "solid") {
+      rows.slice(0, 2).forEach((row) => add(row[0], row[1]));
+    } else if (result.module === "transfection") {
+      rows.forEach((row) => add(`${row[1]} · ${row[2]}`, row[4], String(row[0])));
+    } else if (result.module === "serial") {
+      rows.forEach((row) => {
+        add(`${bilingual("第", "Level ")}${row[0]} · ${bilingual("来源液", "source")}`, row[3], `level-${row[0]}`);
+        add(`${bilingual("第", "Level ")}${row[0]} · ${bilingual("稀释液", "diluent")}`, row[4], `level-${row[0]}`);
+      });
+    } else if (result.module === "drug") {
+      rows.forEach((row) => {
+        add(`${row[0]} · L${row[1]} · ${bilingual("母液", "stock")}`, row[4], `${row[0]}-L${row[1]}`);
+        add(`${row[0]} · L${row[1]} · ${bilingual("稀释液", "diluent")}`, row[5], `${row[0]}-L${row[1]}`);
+      });
+    }
+    return contributions;
+  }
+
+  function selectedLiquidPlates() {
+    if (elements.projectLiquidScope.value === "current") return [project];
+    if (elements.projectLiquidScope.value === "all") return workspace.plates;
+    const checked = new Set([...elements.projectLiquidPlatePicker.querySelectorAll("input:checked")].map((input) => input.value));
+    return workspace.plates.filter((plate) => checked.has(plate.id));
+  }
+
+  function renderProjectLiquidControls() {
+    document.getElementById("projectLiquidTitle").textContent = bilingual("跨板配液汇总", "Cross-plate liquid summary");
+    document.querySelector(".project-liquid-heading p").textContent = bilingual("合并相同配方的基础需求量，再统一加入一次余量。", "Merge compatible base requirements, then apply one shared overage.");
+    document.querySelector(".project-liquid-overage > span:first-child").textContent = bilingual("统一余量", "Shared overage");
+    document.querySelector(".project-liquid-controls label > span").textContent = bilingual("汇总范围", "Summary scope");
+    elements.projectLiquidScope.options[0].textContent = bilingual("当前板", "Current plate");
+    elements.projectLiquidScope.options[1].textContent = bilingual("勾选板", "Checked plates");
+    elements.projectLiquidScope.options[2].textContent = bilingual("全部板", "All plates");
+    elements.projectLiquidSummaryButton.textContent = bilingual("生成汇总", "Build summary");
+    elements.projectLiquidPlatePicker.hidden = elements.projectLiquidScope.value !== "checked";
+    elements.projectLiquidPlatePicker.innerHTML = workspace.plates.map((plate) => `<label><input type="checkbox" value="${escapeHtml(plate.id)}"${plate.id === project.id ? " checked" : ""}>${escapeHtml(plate.name)} · ${plate.plateSize}</label>`).join("");
+    if (!workspace.latestLiquidSummary) elements.projectLiquidSummary.innerHTML = "";
+  }
+
+  function aggregateLiquidPlans(plates, overagePercent) {
+    const contributions = [];
+    const skipped = [];
+    for (const plate of plates) {
+      for (const plan of plate.liquidPlans || []) {
+        if (plan.stale) continue;
+        if (!Array.isArray(plan.contributions) || !plan.contributions.length) skipped.push(`${plate.name} · ${plan.name || plan.module}`);
+        else contributions.push(...plan.contributions.map((item) => ({ ...item, plateId: plate.id, plateName: plate.name })));
+      }
+    }
+    return { merged: Workspace.mergeLiquidContributions(contributions, { overagePercent, minPipetteVolume: 1 }), skipped, contributionCount: contributions.length };
+  }
+
+  function renderProjectLiquidSummary(summary) {
+    if (!summary) { elements.projectLiquidSummary.innerHTML = ""; return; }
+    const rows = summary.groups.flatMap((group) => group.components.map((component) => [
+      group.key.split(":", 1)[0], component.name, group.plates.map((plate) => plate.plateName).join("、"), `${liquidNumber(component.baseVolume)} µL`, `${liquidNumber(component.preparedVolume)} µL`, String(component.containerCount), component.warning ? bilingual("存在单板移液量低于 1 µL", "A per-plate transfer is below 1 µL") : "",
+    ]));
+    const skipped = summary.skipped?.length ? `<div class="project-liquid-summary-note warning">${escapeHtml(bilingual(`有 ${summary.skipped.length} 个旧方案没有可合并明细，请重新打开计算并保存：${summary.skipped.join("；")}`, `${summary.skipped.length} legacy plans have no mergeable detail; recalculate and save them: ${summary.skipped.join("; ")}`))}</div>` : "";
+    const note = `<div class="project-liquid-summary-note">${escapeHtml(bilingual(`已汇总 ${summary.plateNames.length} 块板；相同配方先合并，再统一加入 ${summary.overagePercent}% 余量。此结果会写入 XLSX。`, `${summary.plateNames.length} plates summarized; compatible recipes were merged before one ${summary.overagePercent}% overage was applied. This result is included in XLSX.`))}</div>`;
+    const table = rows.length ? `<div class="liquid-table-wrap"><table class="liquid-table"><thead><tr>${[bilingual("模块", "Module"), bilingual("组分", "Component"), bilingual("来源板", "Plates"), bilingual("基础需求", "Base need"), bilingual("建议准备", "Prepare"), bilingual("容器数", "Containers"), bilingual("提示", "Note")].map((item) => `<th>${item}</th>`).join("")}</tr></thead><tbody>${rows.map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>` : `<div class="project-liquid-summary-note warning">${escapeHtml(bilingual("所选板没有可汇总的已保存配液方案。", "The selected plates have no saved liquid plans that can be summarized."))}</div>`;
+    elements.projectLiquidSummary.innerHTML = note + skipped + table;
+  }
+
   function liquidLayoutPreview(assignments) {
     const columns = Core.getSpec(project.plateSize).columns;
     return `<div class="liquid-layout-preview" style="--preview-columns:${columns}">${assignments.map((item) => `<div class="liquid-preview-well"><strong>${escapeHtml(item.wellId)}</strong><small>${escapeHtml(`${item.drug} · ${liquidNumber(item.concentration, 6)} · R${item.replicate}`)}</small></div>`).join("")}</div>`;
@@ -1426,6 +1655,7 @@
 
   function renderAll() {
     applyLanguage();
+    renderWorkspaceChrome();
     elements.projectName.value = project.name;
     document.querySelectorAll(".plate-option").forEach((button) => button.classList.toggle("active", Number(button.dataset.size) === project.plateSize));
     renderPlate();
@@ -1434,8 +1664,86 @@
     renderSelectOptions();
     renderCalculationOutputs();
     updateSelectionVisuals(false);
-    elements.undoButton.disabled = !undoStack.length;
-    elements.redoButton.disabled = !redoStack.length;
+    const history = historyFor();
+    elements.undoButton.disabled = !history.undo.length && !workspaceUndoStack.length;
+    elements.redoButton.disabled = !history.redo.length && !workspaceRedoStack.length;
+  }
+
+  function switchActivePlate(plateId, { closeOverview = false } = {}) {
+    const next = workspace.plates.find((plate) => plate.id === plateId);
+    if (!next || next.id === project.id) {
+      if (closeOverview) { overviewOpen = false; renderAll(); }
+      return;
+    }
+    workspace.activePlateId = next.id;
+    project = next;
+    selection = new Set();
+    selectionAnchor = null;
+    pendingBatchPaste = null;
+    lastLiquidResult = null;
+    pendingDrugLayout = null;
+    pendingSerialLayout = null;
+    if (closeOverview) overviewOpen = false;
+    saveProject();
+    renderAll();
+  }
+
+  function compatibleOverviewDimensions() {
+    const candidates = new Map();
+    for (const plate of workspace.plates) {
+      for (const dimension of plate.dimensions) {
+        const key = dimension.name.trim().toLowerCase();
+        if (!candidates.has(key)) candidates.set(key, { name: dimension.name, type: dimension.type, unit: dimension.unit || "", compatible: true });
+        else {
+          const existing = candidates.get(key);
+          if (existing.type !== dimension.type || (existing.type === "number" && existing.unit !== (dimension.unit || ""))) existing.compatible = false;
+        }
+      }
+    }
+    return [...candidates.values()].filter((item) => item.compatible).sort((left, right) => left.name.localeCompare(right.name, language === "en" ? "en" : "zh-CN"));
+  }
+
+  function renderWorkspaceChrome() {
+    elements.workspaceName.value = workspace.name;
+    elements.workspaceNameLabel.textContent = bilingual("项目名称", "Project name");
+    elements.addPlateButton.textContent = bilingual("＋ 新建板", "+ New plate");
+    elements.duplicatePlateButton.textContent = bilingual("复制整板", "Duplicate plate");
+    elements.copyStructureButton.textContent = bilingual("仅复制参数", "Copy parameters");
+    elements.overviewToggleButton.textContent = overviewOpen ? bilingual("返回单板", "Single plate") : bilingual("全部板概览", "All plates");
+    elements.plateOverviewTitle.textContent = bilingual("全部板概览", "All plates overview");
+    elements.plateOverviewDescription.textContent = bilingual("点击任意缩略孔板进入精细编辑。", "Open any miniature plate for detailed editing.");
+    elements.overviewColorLabel.textContent = bilingual("统一按参数着色", "Shared color parameter");
+    elements.plateTabs.innerHTML = workspace.plates.map((plate) => `<button class="plate-tab${plate.id === project.id ? " active" : ""}" type="button" role="tab" aria-selected="${plate.id === project.id}" data-plate-id="${escapeHtml(plate.id)}"><span>${escapeHtml(plate.name)}</span><small>${plate.plateSize}</small></button>`).join("");
+    elements.plateTabs.querySelectorAll("[data-plate-id]").forEach((button) => button.addEventListener("click", () => switchActivePlate(button.dataset.plateId)));
+    const index = workspace.plates.findIndex((plate) => plate.id === project.id);
+    elements.movePlateLeftButton.disabled = index <= 0;
+    elements.movePlateRightButton.disabled = index < 0 || index >= workspace.plates.length - 1;
+    elements.addPlateButton.disabled = workspace.plates.length >= 24;
+    elements.duplicatePlateButton.disabled = workspace.plates.length >= 24;
+    elements.copyStructureButton.disabled = workspace.plates.length >= 24;
+    elements.plateOverview.hidden = !overviewOpen;
+    renderProjectLiquidControls();
+    if (workspace.latestLiquidSummary) renderProjectLiquidSummary(workspace.latestLiquidSummary);
+    if (overviewOpen) renderPlateOverview();
+  }
+
+  function renderPlateOverview() {
+    const dimensions = compatibleOverviewDimensions();
+    if (!dimensions.some((item) => item.name === overviewColorName)) overviewColorName = dimensions.find((item) => item.name.toLowerCase() === "处理" || item.name.toLowerCase() === "treatment")?.name || dimensions[0]?.name || "";
+    elements.overviewColorDimension.innerHTML = `<option value="">${bilingual("不着色", "No color")}</option>${dimensions.map((item) => `<option value="${escapeHtml(item.name)}"${item.name === overviewColorName ? " selected" : ""}>${escapeHtml(item.name)}${item.unit ? ` (${escapeHtml(item.unit)})` : ""}</option>`).join("")}`;
+    elements.plateOverviewGrid.innerHTML = workspace.plates.map((plate) => {
+      const spec = Core.getSpec(plate.plateSize);
+      const wells = plate.plates[plate.plateSize];
+      const dimension = plate.dimensions.find((item) => item.name === overviewColorName);
+      const miniWells = Core.makeWellIds(plate.plateSize).map((wellId) => {
+        const value = dimension ? wells[wellId]?.params?.[dimension.id] : "";
+        const filled = wells[wellId] && Object.values(wells[wellId].params || {}).some((item) => item !== "" && item !== undefined);
+        const background = value !== "" && value !== undefined ? colorFor(value)[0] : filled ? "#dfe9e7" : "#f8f5f0";
+        return `<i class="overview-mini-well" style="background:${background}" title="${wellId}${value !== "" && value !== undefined ? ` · ${escapeHtml(value)}` : ""}"></i>`;
+      }).join("");
+      return `<button class="overview-plate${plate.id === project.id ? " active" : ""}" type="button" data-overview-plate="${escapeHtml(plate.id)}"><span class="overview-plate-heading"><strong>${escapeHtml(plate.name)}</strong><span>${plate.plateSize} ${bilingual("孔", "well")}</span></span><span class="overview-mini-grid" style="grid-template-columns:repeat(${spec.columns},1fr)">${miniWells}</span><span class="overview-plate-meta">${Object.keys(wells).length} / ${plate.plateSize} ${bilingual("孔已有信息", "wells assigned")}</span></button>`;
+    }).join("");
+    elements.plateOverviewGrid.querySelectorAll("[data-overview-plate]").forEach((button) => button.addEventListener("click", () => switchActivePlate(button.dataset.overviewPlate, { closeOverview: true })));
   }
 
   function showToast(message) {
@@ -1444,6 +1752,65 @@
     window.clearTimeout(toastTimer);
     toastTimer = window.setTimeout(() => elements.toast.classList.remove("show"), 2400);
   }
+
+  function resetPlateDeleteConfirmation() {
+    window.clearTimeout(plateDeleteTimer);
+    plateDeleteTimer = null;
+    elements.deletePlateButton.classList.remove("confirming");
+    elements.deletePlateButton.textContent = "×";
+    elements.deletePlateButton.setAttribute("aria-label", bilingual("删除当前孔板", "Delete current plate"));
+  }
+
+  elements.workspaceName.addEventListener("input", () => {
+    workspace.name = elements.workspaceName.value.slice(0, 80);
+    saveProject();
+  });
+  elements.workspaceName.addEventListener("keydown", (event) => { if (event.key === "Enter") elements.workspaceName.blur(); });
+  elements.workspaceName.addEventListener("blur", () => {
+    workspace.name = elements.workspaceName.value.trim() || bilingual("未命名项目", "Untitled project");
+    elements.workspaceName.value = workspace.name;
+    saveProject();
+  });
+  elements.addPlateButton.addEventListener("click", () => {
+    commitWorkspace(() => { workspace = Workspace.addPlate(workspace, { name: bilingual(`孔板 ${workspace.plates.length + 1}`, `Plate ${workspace.plates.length + 1}`), plateSize: project.plateSize }); });
+    showToast(bilingual("已新建空白孔板", "Blank plate created"));
+  });
+  elements.duplicatePlateButton.addEventListener("click", () => {
+    const sourceId = project.id;
+    commitWorkspace(() => { workspace = Workspace.duplicatePlate(workspace, sourceId, "full"); });
+    showToast(bilingual("已复制参数与孔位赋值，不含历史计算", "Plate values copied without calculation history"));
+  });
+  elements.copyStructureButton.addEventListener("click", () => {
+    const sourceId = project.id;
+    commitWorkspace(() => { workspace = Workspace.duplicatePlate(workspace, sourceId, "structure"); });
+    showToast(bilingual("已复制参数结构，孔位保持为空", "Parameter structure copied with empty wells"));
+  });
+  elements.movePlateLeftButton.addEventListener("click", () => {
+    const plateId = project.id;
+    commitWorkspace(() => { workspace = Workspace.reorderPlate(workspace, plateId, -1); });
+  });
+  elements.movePlateRightButton.addEventListener("click", () => {
+    const plateId = project.id;
+    commitWorkspace(() => { workspace = Workspace.reorderPlate(workspace, plateId, 1); });
+  });
+  elements.deletePlateButton.addEventListener("click", () => {
+    if (workspace.plates.length <= 1) {
+      showToast(bilingual("项目必须至少保留一块孔板", "A project must keep at least one plate"));
+      return;
+    }
+    if (!plateDeleteTimer) {
+      elements.deletePlateButton.classList.add("confirming");
+      elements.deletePlateButton.textContent = bilingual("确认", "Sure?");
+      plateDeleteTimer = window.setTimeout(resetPlateDeleteConfirmation, 5000);
+      return;
+    }
+    const plateId = project.id;
+    resetPlateDeleteConfirmation();
+    commitWorkspace(() => { workspace = Workspace.removePlate(workspace, plateId); });
+    showToast(bilingual("孔板已删除，可使用撤销恢复", "Plate deleted; undo can restore it"));
+  });
+  elements.overviewToggleButton.addEventListener("click", () => { overviewOpen = !overviewOpen; renderAll(); });
+  elements.overviewColorDimension.addEventListener("change", () => { overviewColorName = elements.overviewColorDimension.value; renderPlateOverview(); });
 
   function cleanWellMap(wellMap, wellId) {
     const params = wellMap[wellId]?.params || {};
@@ -1982,6 +2349,28 @@
 
   document.querySelectorAll(".liquid-module-launch").forEach((button) => button.addEventListener("click", () => openLiquidDrawer(button.dataset.liquidModule)));
   elements.openLiquidCalculatorButton.addEventListener("click", () => openLiquidDrawer(activeLiquidModule));
+  elements.projectLiquidScope.addEventListener("change", renderProjectLiquidControls);
+  elements.projectLiquidSummaryButton.addEventListener("click", () => {
+    const plates = selectedLiquidPlates();
+    if (!plates.length) {
+      showToast(bilingual("请至少勾选一块板", "Select at least one plate"));
+      return;
+    }
+    const overagePercent = Math.max(0, Math.min(100, Number(elements.projectLiquidOverage.value) || 0));
+    const { merged, skipped } = aggregateLiquidPlans(plates, overagePercent);
+    workspace.latestLiquidSummary = {
+      id: `liquid_summary_${Date.now().toString(36)}`,
+      createdAt: new Date().toISOString(),
+      plateIds: plates.map((plate) => plate.id),
+      plateNames: plates.map((plate) => plate.name),
+      overagePercent,
+      groups: merged.groups,
+      skipped,
+    };
+    saveProject();
+    renderProjectLiquidSummary(workspace.latestLiquidSummary);
+    showToast(bilingual("跨板配液汇总已生成，并会写入 XLSX", "Cross-plate liquid summary created and included in XLSX"));
+  });
   elements.closeLiquidDrawerButton.addEventListener("click", closeLiquidDrawer);
   elements.liquidDrawer.querySelector(".liquid-drawer-backdrop").addEventListener("click", closeLiquidDrawer);
   elements.liquidModuleTabs.addEventListener("click", (event) => {
@@ -2262,7 +2651,20 @@
     const savedInput = activeLiquidModule === "basic"
       ? { ...lastLiquidResult.input, workingSolutionConfirmed: "no" }
       : lastLiquidResult.input;
-    const saved = { id: `liquid_${Date.now().toString(36)}`, module: activeLiquidModule, name: bilingual(`${activeLiquidModule} 配液`, `${activeLiquidModule} preparation`), plateSize: project.plateSize, scopeWellIds: liquidTargetWellIds(), input: savedInput, createdAt: new Date().toISOString(), stale: false };
+    const saved = {
+      id: `liquid_${Date.now().toString(36)}`,
+      module: activeLiquidModule,
+      name: bilingual(`${activeLiquidModule} 配液`, `${activeLiquidModule} preparation`),
+      plateId: project.id,
+      plateName: project.name,
+      plateSize: project.plateSize,
+      scopeWellIds: liquidTargetWellIds(),
+      input: savedInput,
+      resultSnapshot: { headers: lastLiquidResult.headers, rows: lastLiquidResult.rows, warnings: lastLiquidResult.warnings || [], checklist: lastLiquidResult.checklist || [] },
+      contributions: liquidResultContributions(lastLiquidResult, project),
+      createdAt: new Date().toISOString(),
+      stale: false,
+    };
     if (action === "save") {
       commit(() => { project.liquidPlans.push(saved); }, { invalidateLiquid: false });
       showToast(bilingual("配方已保存到当前项目", "Recipe saved to the current project"));
@@ -2270,7 +2672,7 @@
     }
     if (action === "save-preset") {
       const library = readLiquidRecipeLibrary();
-      const recipe = { ...saved, name: bilingual(`${activeLiquidModule} 配方 ${new Date().toLocaleString("zh-CN", { hour12: false })}`, `${activeLiquidModule} recipe ${new Date().toLocaleString("en-US")}`), scopeWellIds: undefined, plateSize: undefined, builtIn: false };
+      const recipe = { ...saved, name: bilingual(`${activeLiquidModule} 配方 ${new Date().toLocaleString("zh-CN", { hour12: false })}`, `${activeLiquidModule} recipe ${new Date().toLocaleString("en-US")}`), scopeWellIds: undefined, plateId: undefined, plateName: undefined, plateSize: undefined, resultSnapshot: undefined, contributions: undefined, builtIn: false };
       library.push(recipe);
       writeLiquidRecipeLibrary(library);
       const select = elements.liquidDrawerContent.querySelector("[data-liquid-library-select]");
@@ -2357,8 +2759,91 @@
   });
 
   elements.exportJsonButton.addEventListener("click", () => {
-    downloadBlob(JSON.stringify(project, null, 2), "application/json;charset=utf-8", `${Core.safeFileName(project.name)}_backup.json`);
+    downloadBlob(JSON.stringify(workspace, null, 2), "application/json;charset=utf-8", `${Core.safeFileName(workspace.name)}_workspace_backup.json`);
     showToast(bilingual("项目备份已导出", "Project backup exported"));
+  });
+
+  function nOrderWellIds(plate) {
+    return Core.makeWellIds(plate.plateSize).sort((leftId, rightId) => {
+      const left = Core.parseWell(plate.plateSize, leftId);
+      const right = Core.parseWell(plate.plateSize, rightId);
+      return left.column - right.column || left.row - right.row;
+    });
+  }
+
+  function buildWorkspaceWorkbookSheets() {
+    const overviewName = bilingual("实验总览", "Project overview");
+    const liquidName = bilingual("配液汇总", "Liquid summary");
+    const pipettingName = bilingual("逐步加样清单", "Pipetting checklist");
+    const overviewRows = [[bilingual("板序", "Plate order"), bilingual("板名", "Plate name"), bilingual("规格", "Format"), bilingual("已赋值孔数", "Assigned wells"), bilingual("参数维度数", "Parameters"), bilingual("配液方案数", "Liquid plans")]];
+    workspace.plates.forEach((plate, index) => overviewRows.push([index + 1, plate.name, `${plate.plateSize}-well`, Object.keys(plate.plates[plate.plateSize]).length, plate.dimensions.length, plate.liquidPlans.length]));
+    const sheets = [{ name: overviewName, systemKind: "overview", rows: overviewRows, freezeRows: 1, autoFilter: true }];
+    for (const plate of workspace.plates) {
+      const headers = [bilingual("孔位", "Well"), ...plate.dimensions.map((dimension) => {
+        const name = dimensionLabelForPlate(plate, dimension);
+        return dimension.type === "number" && dimension.unit ? `${name} (${dimension.unit})` : name;
+      })];
+      const rows = [headers, ...Core.makeWellIds(plate.plateSize).map((wellId) => [wellId, ...plate.dimensions.map((dimension) => plate.plates[plate.plateSize][wellId]?.params?.[dimension.id] ?? "")])];
+      sheets.push({ name: plate.name, systemKind: "plate", rows, freezeRows: 1, autoFilter: true });
+    }
+    const liquidRows = [[bilingual("记录类型", "Record type"), bilingual("配方组", "Recipe group"), bilingual("组分/方案", "Component / plan"), bilingual("来源板", "Source plates"), bilingual("基础需求量", "Base need"), bilingual("统一余量", "Shared overage"), bilingual("建议准备量", "Suggested preparation"), bilingual("容器数", "Containers"), bilingual("状态/提示", "Status / note")]];
+    for (const plate of workspace.plates) for (const plan of plate.liquidPlans) liquidRows.push([bilingual("已保存方案", "Saved plan"), plan.module || "", plan.name || "", plate.name, "", "", "", "", plan.stale ? bilingual("需重新计算", "Recalculation required") : bilingual("有效", "Current")]);
+    const liquidSummary = workspace.latestLiquidSummary;
+    if (liquidSummary?.groups?.length) {
+      for (const group of liquidSummary.groups) for (const component of group.components) liquidRows.push([
+        bilingual("跨板汇总", "Cross-plate summary"),
+        group.key,
+        component.name,
+        group.plates.map((plate) => plate.plateName).join("、"),
+        `${liquidNumber(component.baseVolume)} µL`,
+        `${liquidSummary.overagePercent}%`,
+        `${liquidNumber(component.preparedVolume)} µL`,
+        component.containerCount,
+        component.warning ? bilingual("存在单板移液量低于 1 µL", "A per-plate transfer is below 1 µL") : "",
+      ]);
+    }
+    sheets.push({ name: liquidName, systemKind: "liquid", rows: liquidRows, freezeRows: 1, autoFilter: true });
+
+    const pipettingRows = [[bilingual("执行顺序", "Step"), bilingual("试剂/溶液", "Reagent / solution"), bilingual("来源容器或母液", "Source container / stock"), bilingual("目标板", "Target plate"), bilingual("目标孔", "Target well"), bilingual("每孔加入体积", "Volume per well"), bilingual("重复孔数量", "Replicate wells"), bilingual("总需求量", "Total required"), bilingual("建议准备量（含余量）", "Suggested preparation incl. overage"), bilingual("实际加入量", "Actual volume"), bilingual("完成状态", "Done"), bilingual("操作者", "Operator"), bilingual("时间", "Time"), bilingual("备注", "Notes")]];
+    let step = 1;
+    if (liquidSummary?.groups?.length) {
+      for (const group of liquidSummary.groups) for (const component of group.components) {
+        pipettingRows.push([step, component.name, bilingual("按配液汇总配制", "Prepare from liquid summary"), group.plates.map((plate) => plate.plateName).join("、"), bilingual("配液准备", "Preparation"), "", group.plates.length, `${liquidNumber(component.baseVolume)} µL`, `${liquidNumber(component.preparedVolume)} µL`, "", "□", "", "", component.containerCount > 1 ? bilingual(`分装 ${component.containerCount} 管`, `Split across ${component.containerCount} containers`) : ""]);
+        step += 1;
+      }
+    }
+    for (const plate of workspace.plates) {
+      const wells = plate.plates[plate.plateSize];
+      const treatment = plate.dimensions.find((dimension) => dimension.id === "treatment" || /处理|treatment|试剂|reagent/i.test(dimension.name));
+      const volume = plate.dimensions.find((dimension) => dimension.type === "number" && (/体积|volume/i.test(dimension.name) || /^(nL|uL|µL|mL|L)$/i.test(dimension.unit || "")));
+      for (const wellId of nOrderWellIds(plate)) {
+        const params = wells[wellId]?.params || {};
+        if (!Object.values(params).some((value) => value !== "" && value !== undefined)) continue;
+        const volumeValue = volume && params[volume.id] !== undefined && params[volume.id] !== "" ? `${params[volume.id]}${volume.unit ? ` ${volume.unit}` : ""}` : "";
+        pipettingRows.push([step, treatment ? params[treatment.id] ?? "" : "", "", plate.name, wellId, volumeValue, 1, volumeValue, "", "", "□", "", "", ""]);
+        step += 1;
+      }
+    }
+    sheets.push({ name: pipettingName, systemKind: "pipetting", rows: pipettingRows, freezeRows: 1, autoFilter: true });
+    return sheets;
+  }
+
+  function dimensionLabelForPlate(plate, dimension) {
+    const defaultDimension = DEFAULT_DIMENSIONS.find((item) => item.id === dimension.id);
+    if (!defaultDimension) return dimension.name;
+    const englishName = I18N.en.defaultNames[dimension.id];
+    return [defaultDimension.name, englishName].includes(dimension.name) ? (language === "en" ? englishName : defaultDimension.name) : dimension.name;
+  }
+
+  elements.exportXlsxButton.addEventListener("click", () => {
+    try {
+      const bytes = Xlsx.buildWorkbook({ sheets: buildWorkspaceWorkbookSheets() });
+      downloadBlob(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", `${Core.safeFileName(workspace.name)}_multi-plate.xlsx`);
+      showToast(bilingual("多板加样工作簿已导出", "Multi-plate pipetting workbook exported"));
+    } catch (error) {
+      console.error(error);
+      showToast(bilingual(`XLSX 导出失败：${error.message}`, `XLSX export failed: ${error.message}`));
+    }
   });
 
   elements.excelTemplateButton.addEventListener("click", () => {
@@ -2493,18 +2978,58 @@
     });
   }
 
+  function plateDocumentFromLegacy(legacy) {
+    return Workspace.createPlate({
+      name: legacy.name,
+      plateSize: legacy.plateSize,
+      dimensions: legacy.dimensions,
+      wells: legacy.plates[legacy.plateSize],
+      colorDimension: legacy.colorDimension,
+      calculationLog: legacy.calculationLog,
+      calculationOutputs: legacy.calculationOutputs,
+      liquidPlans: legacy.liquidPlans,
+    });
+  }
+
+  function projectFromWorkbookRows(rows, sheetName) {
+    const csv = rows.map((row) => row.map(Core.csvEscape).join(",")).join("\r\n");
+    return projectFromTable(csv, `${sheetName}.csv`);
+  }
+
   elements.importJsonInput.addEventListener("change", async () => {
     const file = elements.importJsonInput.files?.[0];
     if (!file) return;
     try {
-      const text = await file.text();
-      pendingImportedProject = /\.json$/i.test(file.name)
-        ? normalizeProject(JSON.parse(text))
-        : projectFromTable(text, file.name);
+      if (/\.json$/i.test(file.name)) {
+        pendingImportedProject = { kind: "workspace", workspace: Workspace.normalizeWorkspace(JSON.parse(await file.text())) };
+      } else if (/\.xlsx$/i.test(file.name)) {
+        const parsed = await Xlsx.parseWorkbook(new Uint8Array(await file.arrayBuffer()));
+        const systemNames = new Set(["实验总览", "Project overview", "配液汇总", "Liquid summary", "逐步加样清单", "Pipetting checklist"]);
+        const plates = [];
+        const skipped = [];
+        for (const sheet of parsed.sheets) {
+          const firstHeader = String(sheet.rows?.[0]?.[0] || "").trim().toLowerCase().replace(/[\s_-]+/g, "");
+          if (systemNames.has(sheet.name) || !["孔位", "孔号", "well", "wellid"].includes(firstHeader)) { skipped.push(sheet.name); continue; }
+          plates.push(plateDocumentFromLegacy(projectFromWorkbookRows(sheet.rows, sheet.name)));
+        }
+        if (!plates.length) throw new Error(bilingual("工作簿中没有以“孔位/Well”为第一列的孔板工作表。", "No plate worksheet starts with a Well column."));
+        pendingImportedProject = { kind: "plates", plates, skipped };
+      } else {
+        pendingImportedProject = { kind: "plates", plates: [plateDocumentFromLegacy(projectFromTable(await file.text(), file.name))], skipped: [] };
+      }
       elements.importJsonLabel.hidden = true;
+      elements.importModeSelect.hidden = pendingImportedProject.kind === "workspace";
       elements.confirmImportButton.hidden = false;
+      if (pendingImportedProject.kind === "plates") {
+        elements.importModeSelect.options[0].textContent = bilingual("新增孔板", "Add as new plate");
+        elements.importModeSelect.options[1].textContent = bilingual("覆盖当前板", "Replace current plate");
+        elements.importModeSelect.value = "add";
+        showToast(bilingual(`将导入 ${pendingImportedProject.plates.length} 块板${pendingImportedProject.skipped.length ? `，跳过 ${pendingImportedProject.skipped.length} 张系统表` : ""}`, `${pendingImportedProject.plates.length} plate(s) ready${pendingImportedProject.skipped.length ? `; ${pendingImportedProject.skipped.length} system sheet(s) skipped` : ""}`));
+      } else {
+        showToast(bilingual(`将恢复包含 ${pendingImportedProject.workspace.plates.length} 块板的项目`, `Workspace with ${pendingImportedProject.workspace.plates.length} plate(s) ready to restore`));
+      }
       window.clearTimeout(importConfirmationTimer);
-      importConfirmationTimer = window.setTimeout(resetImportConfirmation, 6000);
+      importConfirmationTimer = window.setTimeout(resetImportConfirmation, 15000);
     } catch (error) {
       console.error(error);
       showToast(bilingual(`导入失败：${error.message}`, `Import failed: ${error.message}`));
@@ -2517,20 +3042,33 @@
     pendingImportedProject = null;
     elements.importJsonInput.value = "";
     elements.importJsonLabel.hidden = false;
+    elements.importModeSelect.hidden = true;
     elements.confirmImportButton.hidden = true;
   }
 
   elements.confirmImportButton.addEventListener("click", () => {
     if (!pendingImportedProject) return;
-    undoStack.push(snapshot());
-    redoStack = [];
-    project = pendingImportedProject;
-    selection = new Set();
-    selectionAnchor = null;
+    const pending = pendingImportedProject;
+    const mode = elements.importModeSelect.value;
     resetImportConfirmation();
-    saveProject();
-    renderAll();
-    showToast(bilingual("项目已恢复", "Project restored"));
+    commitWorkspace(() => {
+      if (pending.kind === "workspace") {
+        workspace = pending.workspace;
+        return;
+      }
+      const available = 24 - workspace.plates.length + (mode === "replace" ? 1 : 0);
+      const incoming = pending.plates.slice(0, available);
+      if (mode === "replace") {
+        const index = workspace.plates.findIndex((plate) => plate.id === project.id);
+        incoming[0].id = project.id;
+        workspace.plates.splice(index, 1, ...incoming);
+        workspace.activePlateId = incoming[0].id;
+      } else {
+        workspace.plates.push(...incoming);
+        workspace.activePlateId = incoming[0].id;
+      }
+    });
+    showToast(pending.kind === "workspace" ? bilingual("多板项目已恢复", "Multi-plate workspace restored") : bilingual("孔板已导入", "Plate import completed"));
   });
 
   elements.printButton.addEventListener("click", () => window.print());
@@ -2561,4 +3099,5 @@
   });
 
   renderAll();
+  initializeIndexedStorage();
 })();

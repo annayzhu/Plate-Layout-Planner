@@ -48,6 +48,21 @@ try {
   if (plateNameAffordance.borderBottomStyle !== "dashed" || plateNameAffordance.cursor !== "text") {
     throw new Error(`Plate name does not visibly communicate editability: ${JSON.stringify(plateNameAffordance)}`);
   }
+  const typographyScale = await page.evaluate(() => {
+    const px = (selector) => Number.parseFloat(getComputedStyle(document.querySelector(selector)).fontSize);
+    return {
+      body: Number.parseFloat(getComputedStyle(document.body).fontSize),
+      pageTitle: px(".hero h1"),
+      plateName: px("#projectName"),
+      control: px(".plate-option"),
+      helper: px(".collapsible-summary p"),
+      label: px("label > span"),
+    };
+  });
+  const typographyMinimums = { body: 15, pageTitle: 28, plateName: 20, control: 12, helper: 12, label: 11 };
+  for (const [role, minimum] of Object.entries(typographyMinimums)) {
+    if (typographyScale[role] < minimum) throw new Error(`Typography role ${role} is too small: ${typographyScale[role]}px < ${minimum}px`);
+  }
   const deleteButtonXs = await page.locator(".dimension-delete").evaluateAll((buttons) => buttons.map((button) => button.getBoundingClientRect().x));
   if (Math.max(...deleteButtonXs) - Math.min(...deleteButtonXs) > 1) throw new Error(`Parameter delete buttons were not right-aligned: ${deleteButtonXs.join(",")}`);
   await page.screenshot({ path: resolve(outputDirectory, "01-initial-24-well.png"), fullPage: true });
@@ -77,6 +92,8 @@ try {
   await page.locator("#applyParametersButton").click();
   const initialWellLines = await page.locator('[data-well="A1"] .well-primary, [data-well="A1"] .well-secondary, [data-well="A1"] .well-tertiary').allInnerTexts();
   if (initialWellLines.join("|") !== "Sample-A|Drug A|2") throw new Error(`Well did not show the first three assigned parameters in dimension order: ${initialWellLines.join("|")}`);
+  typographyScale.wellText = await page.locator('[data-well="A1"] .well-primary').evaluate((element) => Number.parseFloat(getComputedStyle(element).fontSize));
+  if (typographyScale.wellText < 9.5) throw new Error(`Well text is too small: ${typographyScale.wellText}px < 9.5px`);
   for (let move = 0; move < 5; move += 1) {
     await page.locator('.dimension-row[data-dimension="value"] [data-action="up"]').click();
   }
@@ -575,7 +592,7 @@ try {
     throw new Error(`English plate size buttons wrapped onto multiple lines: ${plateOptionTops.join(", ")}`);
   }
   const colorSelectHeight = await page.locator("#colorDimension").evaluate((select) => select.getBoundingClientRect().height);
-  if (colorSelectHeight > 33) throw new Error(`Color parameter select is taller than the compact target: ${colorSelectHeight}px`);
+  if (colorSelectHeight > 36) throw new Error(`Color parameter select is taller than the readable compact target: ${colorSelectHeight}px`);
   const toolbarCenters = await page.locator(".plate-heading-tools").evaluate((toolbar) => {
     const elements = [toolbar.querySelector(".selection-actions"), toolbar.querySelector(".color-control"), toolbar.querySelector(".plate-export-actions")];
     return elements.map((element) => {
@@ -607,6 +624,11 @@ try {
   await page.locator("#plateCanvas").scrollIntoViewIfNeeded();
   const pageWidths = await page.evaluate(() => ({ viewport: document.documentElement.clientWidth, page: document.documentElement.scrollWidth }));
   if (pageWidths.page > pageWidths.viewport + 1) throw new Error(`Mobile page overflowed horizontally: ${JSON.stringify(pageWidths)}`);
+  const mobileTypography = await page.evaluate(() => ({
+    body: Number.parseFloat(getComputedStyle(document.body).fontSize),
+    helper: Number.parseFloat(getComputedStyle(document.querySelector(".plate-interaction-help")).fontSize),
+  }));
+  if (mobileTypography.body < 15 || mobileTypography.helper < 11) throw new Error(`Mobile typography regressed: ${JSON.stringify(mobileTypography)}`);
   await page.screenshot({ path: resolve(outputDirectory, "05-mobile-24-well.png"), fullPage: true });
   await page.locator('.liquid-module-launch[data-liquid-module="basic"]').click();
   await page.locator('#liquidActiveForm [name="calculationType"]').selectOption("fixed");
@@ -811,6 +833,7 @@ try {
     multiPlateWorkspace: "same-format plates stayed isolated; overview, duplication, deletion, project undo, persistence, and XLSX round-trip passed",
     crossPlateLiquid: "two compatible saved plans exposed per-plate contributions, merged before one shared 10% overage, and split by container capacity",
     xlsxExecutionOrder: "N remained the default; optional Z produced A1, A2, B1 in the exported execution checklist",
+    typography: { desktop: typographyScale, mobile: mobileTypography },
     mobilePageWidth: pageWidths,
     languageSwitch: "Chinese and English persisted across reload",
     screenshots: outputDirectory,

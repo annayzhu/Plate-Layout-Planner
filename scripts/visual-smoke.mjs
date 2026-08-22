@@ -191,6 +191,18 @@ try {
   const basicForm = page.locator("#liquidActiveForm");
   await basicForm.locator('[name="calculationType"]').selectOption("fixed");
   if ((await basicForm.locator('[name="calculationType"]').inputValue()) !== "fixed" || await basicForm.locator("[data-fixed-reagent-row]").count() !== 1) throw new Error("Basic preparation did not open in the lightweight fixed-ratio task with one editable example.");
+  const fixedEditorLayout = await basicForm.locator("[data-fixed-reagent-row]").first().evaluate((row) => {
+    const card = row.closest(".liquid-form-card");
+    const rowRect = row.getBoundingClientRect();
+    const cardRect = card.getBoundingClientRect();
+    const numberWidths = [...row.querySelectorAll('.fixed-ratio-sentence input[type="number"]')].map((input) => input.getBoundingClientRect().width);
+    const unitWidths = [...row.querySelectorAll(".fixed-ratio-sentence select")].map((select) => select.getBoundingClientRect().width);
+    return { rowRight: rowRect.right, cardRight: cardRect.right, numberWidths, unitWidths };
+  });
+  if (fixedEditorLayout.rowRight > fixedEditorLayout.cardRight - 8) throw new Error(`Fixed-ratio reagent row overflowed the form card: ${JSON.stringify(fixedEditorLayout)}`);
+  if (fixedEditorLayout.numberWidths.some((width) => width < 72)) throw new Error(`Fixed-ratio numbers are not readable: ${JSON.stringify(fixedEditorLayout)}`);
+  if (fixedEditorLayout.unitWidths.some((width) => width < 56)) throw new Error(`Fixed-ratio unit selectors are not usable: ${JSON.stringify(fixedEditorLayout)}`);
+  await page.screenshot({ path: resolve(outputDirectory, "02e-fixed-ratio-editor.png"), fullPage: true });
   if ((await basicForm.locator('[name="wellCount"]').inputValue()) !== "24" || await basicForm.locator('[name="wellCount"]').isEditable()) throw new Error("Fixed-ratio plate scope is not a read-only 24-well count.");
   await page.locator('#liquidActiveForm button[type="submit"]').click();
   let basicResultText = await page.locator("#liquidResultHost").innerText();
@@ -574,6 +586,15 @@ try {
   }
   if (await page.locator(".liquid-scope-help:visible").count() !== 1) throw new Error("Mobile liquid drawer hid the plate-scope guidance.");
   if (!(await page.locator("[data-fixed-reagent-row]").first().isVisible())) throw new Error("Mobile liquid drawer hid the fixed-ratio reagent editor.");
+  const mobileFixedLayout = await page.locator("[data-fixed-reagent-row]").first().evaluate((row) => {
+    const cardRect = row.closest(".liquid-form-card").getBoundingClientRect();
+    const rowRect = row.getBoundingClientRect();
+    const numberWidths = [...row.querySelectorAll('.fixed-ratio-sentence input[type="number"]')].map((input) => input.getBoundingClientRect().width);
+    return { rowRight: rowRect.right, cardRight: cardRect.right, numberWidths };
+  });
+  if (mobileFixedLayout.rowRight > mobileFixedLayout.cardRight - 8 || mobileFixedLayout.numberWidths.some((width) => width < 72)) {
+    throw new Error(`Mobile fixed-ratio editor is clipped or unreadable: ${JSON.stringify(mobileFixedLayout)}`);
+  }
   await page.screenshot({ path: resolve(outputDirectory, "05b-mobile-liquid-drawer.png"), fullPage: true });
   await page.locator("#closeLiquidDrawerButton").click();
 

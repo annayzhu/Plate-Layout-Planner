@@ -202,6 +202,19 @@ try {
   if (fixedEditorLayout.rowRight > fixedEditorLayout.cardRight - 8) throw new Error(`Fixed-ratio reagent row overflowed the form card: ${JSON.stringify(fixedEditorLayout)}`);
   if (fixedEditorLayout.numberWidths.some((width) => width < 72)) throw new Error(`Fixed-ratio numbers are not readable: ${JSON.stringify(fixedEditorLayout)}`);
   if (fixedEditorLayout.unitWidths.some((width) => width < 56)) throw new Error(`Fixed-ratio unit selectors are not usable: ${JSON.stringify(fixedEditorLayout)}`);
+  const firstFixedReagent = basicForm.locator("[data-fixed-reagent-row]").first();
+  if ((await firstFixedReagent.locator("[data-fixed-reference-label]").innerText()).trim() !== "参照培养基体积") throw new Error("Fixed-ratio reference field is not labeled as medium volume in extra-add mode.");
+  await firstFixedReagent.locator('[data-fixed-field="referenceVolume"]').fill("90");
+  await firstFixedReagent.locator('[data-fixed-field="reagentVolume"]').fill("10");
+  let ratioPreview = await firstFixedReagent.locator("[data-fixed-ratio-preview]").innerText();
+  if (!ratioPreview.includes("CCK-8 : 培养基 = 1:9") || !ratioPreview.includes("CCK-8 : 最终体系 = 1:10")) throw new Error(`Extra-add ratio denominators are ambiguous: ${ratioPreview}`);
+  await page.screenshot({ path: resolve(outputDirectory, "02f-ratio-denominators.png"), fullPage: true });
+  await basicForm.locator('[name="fixedMeaning"]').selectOption("final");
+  if ((await firstFixedReagent.locator("[data-fixed-reference-label]").innerText()).trim() !== "参照最终体系体积") throw new Error("Fixed-ratio reference field is not labeled as final-mixture volume in final mode.");
+  ratioPreview = await firstFixedReagent.locator("[data-fixed-ratio-preview]").innerText();
+  if (!ratioPreview.includes("CCK-8 : 最终体系 = 1:9") || ratioPreview.includes("培养基")) throw new Error(`Final-mixture ratio is not explicit: ${ratioPreview}`);
+  await basicForm.locator('[name="fixedMeaning"]').selectOption("extra");
+  await firstFixedReagent.locator('[data-fixed-field="referenceVolume"]').fill("100");
   await page.screenshot({ path: resolve(outputDirectory, "02e-fixed-ratio-editor.png"), fullPage: true });
   if ((await basicForm.locator('[name="wellCount"]').inputValue()) !== "24" || await basicForm.locator('[name="wellCount"]').isEditable()) throw new Error("Fixed-ratio plate scope is not a read-only 24-well count.");
   await page.locator('#liquidActiveForm button[type="submit"]').click();
@@ -213,6 +226,10 @@ try {
   await secondReagent.locator('[data-fixed-field="referenceVolume"]').fill("1");
   await secondReagent.locator('[data-fixed-field="referenceUnit"]').selectOption("mL");
   await secondReagent.locator('[data-fixed-field="reagentVolume"]').fill("10");
+  const multiReagentPreviews = await basicForm.locator("[data-fixed-ratio-preview]").allInnerTexts();
+  if (!multiReagentPreviews[0].includes("CCK-8 : 最终体系 = 1:11.1") || !multiReagentPreviews[1].includes("Dye : 最终体系 = 1:111")) {
+    throw new Error(`Extra-add final-mixture ratios did not include all reagents: ${JSON.stringify(multiReagentPreviews)}`);
+  }
   await basicForm.locator('[name="fixedMeaning"]').selectOption("final");
   await basicForm.locator('button[type="submit"]').click();
   basicResultText = await page.locator("#liquidResultHost").innerText();

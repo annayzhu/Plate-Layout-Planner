@@ -2000,19 +2000,34 @@
   }
 
   function fixedReagentRowMarkup(reagent = {}) {
-    return `<div class="fixed-reagent-row" data-fixed-reagent-row><label><span>${bilingual("试剂名称", "Reagent name")}</span><input data-fixed-field="name" type="text" value="${escapeHtml(reagent.name || "")}" placeholder="CCK-8"></label><div class="fixed-ratio-sentence"><span>${bilingual("每", "For every")}</span><div class="liquid-inline-input"><input data-fixed-field="referenceVolume" type="number" min="0" step="any" value="${escapeHtml(reagent.referenceVolume || "100")}"><select data-fixed-field="referenceUnit">${liquidUnitOptions(["µL", "mL"], reagent.referenceUnit || "µL")}</select></div><span data-fixed-reference-word>${bilingual("培养基，加入", "of medium, add")}</span><div class="liquid-inline-input"><input data-fixed-field="reagentVolume" type="number" min="0" step="any" value="${escapeHtml(reagent.reagentVolume || "10")}"><select data-fixed-field="reagentUnit">${liquidUnitOptions(["µL", "mL"], reagent.reagentUnit || "µL")}</select></div></div><small data-fixed-ratio-preview></small><button class="icon-button" data-liquid-action="remove-fixed-reagent" type="button" aria-label="${bilingual("删除试剂", "Remove reagent")}">×</button></div>`;
+    return `<div class="fixed-reagent-row" data-fixed-reagent-row><label><span>${bilingual("试剂名称", "Reagent name")}</span><input data-fixed-field="name" type="text" value="${escapeHtml(reagent.name || "")}" placeholder="CCK-8"></label><div class="fixed-ratio-sentence"><label><span data-fixed-reference-label>${bilingual("参照培养基体积", "Reference medium volume")}</span><div class="liquid-inline-input"><input data-fixed-field="referenceVolume" type="number" min="0" step="any" value="${escapeHtml(reagent.referenceVolume || "100")}"><select data-fixed-field="referenceUnit">${liquidUnitOptions(["µL", "mL"], reagent.referenceUnit || "µL")}</select></div></label><label><span>${bilingual("加入试剂体积", "Reagent volume to add")}</span><div class="liquid-inline-input"><input data-fixed-field="reagentVolume" type="number" min="0" step="any" value="${escapeHtml(reagent.reagentVolume || "10")}"><select data-fixed-field="reagentUnit">${liquidUnitOptions(["µL", "mL"], reagent.reagentUnit || "µL")}</select></div></label></div><small data-fixed-ratio-preview></small><button class="icon-button" data-liquid-action="remove-fixed-reagent" type="button" aria-label="${bilingual("删除试剂", "Remove reagent")}">×</button></div>`;
   }
 
   function syncFixedReagentRows(form) {
     const rows = fixedReagentRows(form);
     form.elements.fixedReagentsJson.value = JSON.stringify(rows);
-    const referenceWord = form.elements.fixedMeaning.value === "final" ? bilingual("最终体系，加入", "of final mixture, add") : bilingual("培养基，加入", "of medium, add");
+    const finalMeaning = form.elements.fixedMeaning.value === "final";
+    const referenceLabel = finalMeaning ? bilingual("参照最终体系体积", "Reference final-mixture volume") : bilingual("参照培养基体积", "Reference medium volume");
+    const ratiosToReference = rows.map((reagent) => {
+      const referenceUL = Number(reagent.referenceVolume) * (reagent.referenceUnit === "mL" ? 1000 : 1);
+      const reagentUL = Number(reagent.reagentVolume) * (reagent.reagentUnit === "mL" ? 1000 : 1);
+      return referenceUL > 0 && reagentUL > 0 ? reagentUL / referenceUL : NaN;
+    });
+    const totalReagentPerMedium = ratiosToReference.every(Number.isFinite) ? ratiosToReference.reduce((sum, ratio) => sum + ratio, 0) : NaN;
     form.querySelectorAll("[data-fixed-reagent-row]").forEach((row, index) => {
-      row.querySelector("[data-fixed-reference-word]").textContent = referenceWord;
+      row.querySelector("[data-fixed-reference-label]").textContent = referenceLabel;
       const reagent = rows[index];
       const referenceUL = Number(reagent.referenceVolume) * (reagent.referenceUnit === "mL" ? 1000 : 1);
       const reagentUL = Number(reagent.reagentVolume) * (reagent.reagentUnit === "mL" ? 1000 : 1);
-      row.querySelector("[data-fixed-ratio-preview]").textContent = referenceUL > 0 && reagentUL > 0 ? bilingual(`等效体积比 1:${liquidNumber(referenceUL / reagentUL, 4)}`, `Equivalent volume ratio 1:${liquidNumber(referenceUL / reagentUL, 4)}`) : bilingual("请填写大于 0 的体积。", "Enter volumes greater than zero.");
+      const reagentName = reagent.name.trim() || bilingual("试剂", "Reagent");
+      let preview = bilingual("请填写大于 0 的体积。", "Enter volumes greater than zero.");
+      if (referenceUL > 0 && reagentUL > 0) {
+        const referenceDenominator = referenceUL / reagentUL;
+        preview = finalMeaning
+          ? bilingual(`${reagentName} : 最终体系 = 1:${liquidNumber(referenceDenominator, 4)}`, `${reagentName} : final mixture = 1:${liquidNumber(referenceDenominator, 4)}`)
+          : bilingual(`${reagentName} : 培养基 = 1:${liquidNumber(referenceDenominator, 4)}；${reagentName} : 最终体系 = 1:${liquidNumber((1 + totalReagentPerMedium) / ratiosToReference[index], 4)}`, `${reagentName} : medium = 1:${liquidNumber(referenceDenominator, 4)}; ${reagentName} : final mixture = 1:${liquidNumber((1 + totalReagentPerMedium) / ratiosToReference[index], 4)}`);
+      }
+      row.querySelector("[data-fixed-ratio-preview]").textContent = preview;
     });
   }
 

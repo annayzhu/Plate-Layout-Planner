@@ -36,6 +36,16 @@
     return { row, column, index: row * spec.columns + column };
   }
 
+  function orderedWellIds(size, order = "N") {
+    const ids = makeWellIds(size);
+    if (order === "Z") return ids;
+    return ids.sort((leftId, rightId) => {
+      const left = parseWell(size, leftId);
+      const right = parseWell(size, rightId);
+      return left.column - right.column || left.row - right.row;
+    });
+  }
+
   function rangeSelection(size, startId, endId) {
     const ids = makeWellIds(size);
     const start = ids.indexOf(startId);
@@ -144,6 +154,7 @@
     getSpec,
     makeWellIds,
     parseWell,
+    orderedWellIds,
     rangeSelection,
     rectangleSelection,
     asFiniteNumber,

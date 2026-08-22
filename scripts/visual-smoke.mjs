@@ -1,5 +1,9 @@
 import { mkdir, readFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { resolve } from "node:path";
+
+const require = createRequire(import.meta.url);
+const XlsxCore = require("../xlsx-core.js");
 
 const playwrightModule = process.env.PLAYWRIGHT_MODULE_URL || "playwright";
 let chromium;
@@ -700,9 +704,20 @@ try {
   }
   await page.locator("#projectLiquidScope").selectOption("all");
   await page.locator("#projectLiquidOverage").fill("10");
+  await page.locator("#projectLiquidContainerCapacity").fill("25");
   await page.locator("#projectLiquidSummaryButton").click();
   const liquidSummaryText = await page.locator("#projectLiquidSummary").innerText();
   if (!liquidSummaryText.includes("已汇总 2 块板") || !liquidSummaryText.includes("Legacy project") || !liquidSummaryText.includes("Legacy copy")) throw new Error(`Cross-plate liquid summary did not merge the two saved plans: ${liquidSummaryText}`);
+  const containerCounts = await page.locator("#projectLiquidSummary .liquid-table tbody tr td:nth-child(6)").allInnerTexts();
+  if (!containerCounts.some((value) => Number(value) > 1)) throw new Error(`Container-capacity splitting was not exposed in the project summary: ${containerCounts.join(", ")}`);
+
+  for (const [wellId, value] of [["A2", "Z-A2"], ["B1", "Z-B1"]]) {
+    await page.locator(`[data-well="${wellId}"]`).click();
+    await page.locator(".parameter-input-row").filter({ hasText: "样本" }).locator(".parameter-value").fill(value);
+    await page.locator("#applyParametersButton").click();
+  }
+  if ((await page.locator("#xlsxOrderSelect").inputValue()) !== "N") throw new Error("XLSX execution order did not default to N.");
+  await page.locator("#xlsxOrderSelect").selectOption("Z");
 
   await page.locator("#overviewToggleButton").click();
   if (await page.locator(".overview-plate").count() !== 2) throw new Error("Project overview did not show both physical plates.");
@@ -716,6 +731,10 @@ try {
   const xlsxPath = await xlsxDownload.path();
   const xlsxBytes = await readFile(xlsxPath);
   if (xlsxBytes[0] !== 0x50 || xlsxBytes[1] !== 0x4b) throw new Error("Multi-plate export is not a real XLSX ZIP workbook.");
+  const parsedWorkbook = await XlsxCore.parseWorkbook(xlsxBytes);
+  const pipettingSheet = parsedWorkbook.sheets.find((sheet) => /逐步加样清单|Pipetting checklist/.test(sheet.name));
+  const copyWellOrder = (pipettingSheet?.rows || []).filter((row) => row[3] === "Legacy copy" && /^[A-Z]+\d+$/.test(String(row[4]))).map((row) => row[4]);
+  if (copyWellOrder.slice(0, 3).join(",") !== "A1,A2,B1") throw new Error(`Z-order XLSX checklist was incorrect: ${copyWellOrder.join(",")}`);
   await page.locator("#importJsonInput").setInputFiles({ name: "roundtrip.xlsx", mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", buffer: xlsxBytes });
   await page.locator("#confirmImportButton").click();
   if (await page.locator(".plate-tab").count() !== 4) throw new Error("XLSX round-trip did not add exactly the two plate worksheets or failed to skip system sheets.");
@@ -790,7 +809,8 @@ try {
     interactionHelp: "selection instructions sit inside the plate visualization above the wells",
     spreadsheetImport: "Excel-compatible CSV created a 12-well plate with units and quoted values",
     multiPlateWorkspace: "same-format plates stayed isolated; overview, duplication, deletion, project undo, persistence, and XLSX round-trip passed",
-    crossPlateLiquid: "two compatible saved plans merged before a single shared 10% overage and were included in XLSX",
+    crossPlateLiquid: "two compatible saved plans exposed per-plate contributions, merged before one shared 10% overage, and split by container capacity",
+    xlsxExecutionOrder: "N remained the default; optional Z produced A1, A2, B1 in the exported execution checklist",
     mobilePageWidth: pageWidths,
     languageSwitch: "Chinese and English persisted across reload",
     screenshots: outputDirectory,

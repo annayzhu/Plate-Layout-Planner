@@ -6,7 +6,7 @@
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
     <meta name="description" content="纯浏览器本地运行的 6、12、24、96、384 孔板布局、标签与批量计算工具。" />
     <title>Plate Layout Planner · 孔板布局规划工具</title>
-    <link rel="stylesheet" href="styles.css?v=20260822-4" />
+    <link rel="stylesheet" href="styles.css?v=20260822-5" />
   </head>
   <body>
     <header class="topbar">
@@ -105,6 +105,7 @@
                   <button id="exportSvgButton" class="secondary-button" type="button">SVG</button>
                   <button id="exportJsonButton" class="primary-button" type="button" data-i18n="backup">备份</button>
                   <button id="exportXlsxButton" class="secondary-button" type="button">XLSX</button>
+                  <select id="xlsxOrderSelect" class="compact-export-order" aria-label="XLSX 加样顺序" title="XLSX 加样顺序"><option value="N">N 序</option><option value="Z">Z 序</option></select>
                   <button id="excelTemplateButton" class="secondary-button" type="button" data-i18n="excelTemplate">Excel 模板</button>
                   <label id="importJsonLabel" class="secondary-button file-button"><span data-i18n="import">导入表格</span><input id="importJsonInput" type="file" accept=".xlsx,.csv,.tsv,.json,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv,text/tab-separated-values,application/json" hidden /></label>
                   <select id="importModeSelect" class="compact-import-mode" hidden aria-label="导入方式"><option value="add">新增孔板</option><option value="replace">覆盖当前板</option></select>
@@ -199,7 +200,10 @@
                   <h3 id="projectLiquidTitle">跨板配液汇总</h3>
                   <p>合并相同配方的基础需求量，再统一加入一次余量。</p>
                 </div>
-                <label class="project-liquid-overage"><span>统一余量</span><span><input id="projectLiquidOverage" type="number" min="0" max="100" step="0.1" value="10" />%</span></label>
+                <div class="project-liquid-settings">
+                  <label class="project-liquid-overage"><span>统一余量</span><span><input id="projectLiquidOverage" type="number" min="0" max="100" step="0.1" value="10" />%</span></label>
+                  <label class="project-liquid-capacity"><span>单管上限</span><span><input id="projectLiquidContainerCapacity" type="number" min="1" step="any" placeholder="不限" /> µL</span></label>
+                </div>
               </div>
               <div class="project-liquid-controls">
                 <label><span>汇总范围</span><select id="projectLiquidScope"><option value="current">当前板</option><option value="checked">勾选板</option><option value="all">全部板</option></select></label>
@@ -272,10 +276,10 @@
     </div>
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
-    <script src="core.js?v=20260819-7"></script>
+    <script src="core.js?v=20260822-8"></script>
     <script src="liquid-core.js?v=20260820-2"></script>
     <script src="workspace-core.js?v=20260822-1"></script>
     <script src="xlsx-core.js?v=20260822-1"></script>
-    <script src="app.js?v=20260822-5"></script>
+    <script src="app.js?v=20260822-6"></script>
   </body>
 </html>

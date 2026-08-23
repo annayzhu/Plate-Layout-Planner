@@ -6,6 +6,7 @@
   "scripts": {
     "test": "node --test tests/*.test.js",
     "serve": "python3 -m http.server 4186",
-    "test:visual": "node scripts/visual-smoke.mjs artifacts/visual-smoke"
+    "test:visual": "node scripts/visual-smoke.mjs artifacts/visual-smoke",
+    "test:visual:journey": "node scripts/visual-smoke.mjs artifacts/visual-journey"
   }
 }

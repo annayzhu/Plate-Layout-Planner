@@ -30,6 +30,61 @@
     return JSON.stringify(normalizedScalar(value));
   }
 
+  const UNIT_SCALE = Object.freeze({ nM: 1, "µM": 1000, uM: 1000, mM: 1e6, M: 1e9, "ng/µL": 1, "ng/uL": 1, "µg/µL": 1000, "ug/uL": 1000, ng: 1, "µg": 1000, ug: 1000, pmol: 1, nmol: 1000 });
+
+  function normalizedQuantity(value, unit) {
+    const number = Number(value);
+    const scale = UNIT_SCALE[String(unit || "").trim()];
+    return Number.isFinite(number) && scale ? number * scale : normalizedScalar(value);
+  }
+
+  function canonicalChemistry(input = {}) {
+    const stockUnit = String(input.stockUnit || "").trim();
+    const targetUnit = String(input.targetUnit || "").trim();
+    const chemistry = {
+      preset: normalizedScalar(input.preset),
+      direction: input.direction === "reverse" ? "reverse" : "forward",
+      stockRequirement: normalizedQuantity(input.stockConcentration, stockUnit),
+      stockDimension: /M$/.test(stockUnit) ? "nM" : /\/µ?L$|\/uL$/.test(stockUnit) ? "ng/µL" : stockUnit,
+      targetRequirement: normalizedQuantity(input.targetValue, targetUnit),
+      targetDimension: /M$/.test(targetUnit) ? "nM" : /mol$/.test(targetUnit) ? "pmol" : /g$/.test(targetUnit) ? "ng" : targetUnit,
+      reagentPerWell: normalizedScalar(input.reagentPerWell),
+      p3000PerUg: normalizedScalar(input.p3000PerUg),
+      lengthBp: normalizedScalar(input.lengthBp),
+      totalCargoMassNg: normalizedQuantity(input.totalCargoMass, input.totalCargoMassUnit),
+      totalCargoAmountPmol: normalizedQuantity(input.totalCargoAmount, input.totalCargoAmountUnit),
+    };
+    return Object.fromEntries(Object.entries(chemistry).filter(([, value]) => value !== "" && value !== undefined));
+  }
+
+  function preparationCompatibility({ input = {}, result = {}, tube = "Tube", tubeRole = "standard" } = {}) {
+    const components = (result.totals || []).filter((row) => String(row.tube || "Tube").trim() === tube).map((row) => ({
+      component: String(row.component || "Component").trim(),
+      perWellVolumeUL: Number(row.volumeUL) || 0,
+    })).sort((left, right) => left.component.localeCompare(right.component) || left.perWellVolumeUL - right.perWellVolumeUL);
+    const chemistry = canonicalChemistry(input);
+    if (input.protocolMode === "custom") chemistry.customProtocol = String(input.protocolSteps || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    const operationProfile = {
+      module: "transfection",
+      chemistry,
+      handling: {
+        finalVolumeUL: Number(result.finalVolumeUL) || 0,
+        complexVolumeUL: Number(result.complexVolumeUL) || 0,
+        cellMediumVolumeUL: Number(result.cellMediumVolumeUL) || 0,
+        incubationMinutes: input.protocolMode === "custom" ? null : input.preset === "rnai" ? 5 : null,
+      },
+    };
+    const profile = {
+      module: "transfection",
+      tubeRole,
+      tube,
+      chemistry,
+      components,
+      handling: operationProfile.handling,
+    };
+    return { key: stableStringify(profile), profile, operationKey: stableStringify(operationProfile) };
+  }
+
   function cargoIdentityFor(group) {
     const names = [...new Set((group?.result?.cargos || []).map((cargo) => String(cargo?.name || "").trim()).filter(Boolean))];
     return names.join(" + ") || String(group?.name || "Unnamed cargo").trim();
@@ -37,7 +92,6 @@
 
   function buildTransfectionContributions({ input = {}, plate, planName = "Transfection", groups = [] } = {}) {
     if (!plate?.id) throw new Error("A plate identity is required.");
-    const compatibility = stableStringify(stableRecipeInput(input));
     const contributions = [];
     const cargoDependentTubes = new Set((groups || []).flatMap((group) => (group?.result?.totals || []).filter((row) => row.tubeRole === "cargo" || row.cargoDependent === true).map((row) => String(row.tube || "Tube").trim())));
     for (const [displayOrder, group] of (groups || []).entries()) {
@@ -49,15 +103,19 @@
         if (!Number.isFinite(totalVolume) || totalVolume < 0) continue;
         const tube = String(row.tube || "Tube").trim();
         const tubeRole = cargoDependentTubes.has(tube) ? "cargo" : "common";
+        const compatibility = preparationCompatibility({ input, result, tube, tubeRole });
+        const keepSeparate = input.mergeCommonMix === "off" && tubeRole === "common";
         const groupKey = tubeRole === "cargo"
-          ? `transfection:cargo:${cargoIdentity}:${tube}:${compatibility}`
-          : `transfection:common:${tube}:${compatibility}`;
+          ? `transfection:cargo:${cargoIdentity}:${tube}:${compatibility.key}`
+          : `transfection:common:${tube}:${keepSeparate ? `${plate.id}:${cargoIdentity}:` : ""}${compatibility.key}`;
         contributions.push({
           executionPlanVersion: EXECUTION_PLAN_VERSION,
           module: "transfection",
           groupKey,
           groupLabel: tubeRole === "cargo" ? `${cargoIdentity} · ${tube}` : `${planName} · ${tube}`,
-          compatibilityKey: compatibility,
+          compatibilityKey: compatibility.key,
+          compatibilityProfile: compatibility.profile,
+          operationCompatibilityKey: compatibility.operationKey,
           displayOrder,
           tubeRole,
           tube,
@@ -178,6 +236,7 @@
       wellCount: sourceWellCount(group.sources || []),
       warning: (group.components || []).some((component) => component.warning) ? "below-minimum-pipette-volume" : "",
       compatibilityKey: group.compatibilityKey || "",
+      operationCompatibilityKey: group.operationCompatibilityKey || group.compatibilityKey || "",
       tube: safeDisplayLabel(group.tube),
     });
     const preparations = [...cargoGroups.map(preparationFor), ...commonGroups.map(preparationFor)];
@@ -201,7 +260,7 @@
     }
     for (const cargo of preparations.filter((entry) => entry.role === "cargo")) {
       const source = cargo.sources[0] || {};
-      const compatibleCommon = preparations.filter((entry) => entry.role === "common" && (!cargo.compatibilityKey || entry.compatibilityKey === cargo.compatibilityKey));
+      const compatibleCommon = preparations.filter((entry) => entry.role === "common" && (!cargo.operationCompatibilityKey || entry.operationCompatibilityKey === cargo.operationCompatibilityKey));
       const commonNames = compatibleCommon.map((entry) => entry.label).join(isEnglish ? ", " : "、");
       const incubation = Number(source.incubationMinutes);
       const incubationText = Number.isFinite(incubation) && incubation > 0
@@ -217,7 +276,7 @@
     const batches = new Map();
     for (const cargo of preparations.filter((entry) => entry.role === "cargo")) {
       const source = cargo.sources[0] || {};
-      const key = `${cargo.compatibilityKey}\u0000${source.direction || "forward"}\u0000${Number(source.cellMediumVolumeUL) || 0}`;
+      const key = `${cargo.operationCompatibilityKey}\u0000${source.direction || "forward"}\u0000${Number(source.cellMediumVolumeUL) || 0}`;
       if (!batches.has(key)) batches.set(key, { direction: source.direction === "reverse" ? "reverse" : "forward", cellMediumVolumeUL: Number(source.cellMediumVolumeUL) || 0, cargos: [] });
       batches.get(key).cargos.push(cargo);
     }
@@ -262,6 +321,7 @@
         tube: item.tube,
         cargoIdentity: item.cargoIdentity || "",
         compatibilityKey: item.compatibilityKey || "",
+        operationCompatibilityKey: item.operationCompatibilityKey || item.compatibilityKey || "",
         displayOrder: Number.isFinite(Number(item.displayOrder)) ? Number(item.displayOrder) : Number.MAX_SAFE_INTEGER,
         components: [],
         sources: [],
@@ -302,5 +362,5 @@
     return buildTransfectionExecutionPlan({ groups: buildExecutionGroupsFromContributions(contributions), language });
   }
 
-  return { EXECUTION_PLAN_VERSION, stableRecipeInput, buildTransfectionContributions, buildTransfectionProtocol, buildExecutionGroupsFromContributions, buildTransfectionExecutionPlanFromContributions, buildTransfectionExecutionPlan, safeDisplayLabel };
+  return { EXECUTION_PLAN_VERSION, stableRecipeInput, preparationCompatibility, buildTransfectionContributions, buildTransfectionProtocol, buildExecutionGroupsFromContributions, buildTransfectionExecutionPlanFromContributions, buildTransfectionExecutionPlan, safeDisplayLabel };
 });

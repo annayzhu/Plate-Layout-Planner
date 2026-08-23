@@ -46,6 +46,61 @@ test("supports two independent plates with the same format", () => {
   assert.notEqual(workspace.plates[0].id, workspace.plates[1].id);
 });
 
+test("normalizes legacy duplicate liquid plans to one current plan and an inert archive", () => {
+  const workspace = Workspace.normalizeWorkspace({
+    version: 2,
+    name: "Duplicate plan fixture",
+    activePlateId: "p1",
+    latestLiquidSummary: { plateNames: ["stale cached summary"] },
+    plates: [{
+      id: "p1",
+      name: "A549-1",
+      plateSize: 6,
+      dimensions: [],
+      plates: { 6: {} },
+      liquidPlans: [
+        { id: "old", name: "Old plan", updatedAt: "2026-08-23T10:00:00.000Z", stale: false },
+        { id: "latest", name: "Latest plan", updatedAt: "2026-08-23T11:00:00.000Z", stale: false },
+      ],
+    }],
+  });
+
+  const plate = workspace.plates[0];
+  assert.equal(Workspace.currentLiquidPlan(plate).id, "latest");
+  assert.equal(plate.liquidPlans.length, 1);
+  assert.deepEqual(plate.archivedLiquidPlans.map((plan) => plan.id), ["old"]);
+  assert.deepEqual(workspace.migrationNotices, [{ plateId: "p1", plateName: "A549-1", keptPlanName: "Latest plan", archivedCount: 1 }]);
+  assert.equal(workspace.latestLiquidSummary, null);
+});
+
+test("publishing a liquid plan atomically replaces the plate plan while preserving identity", () => {
+  const plate = Workspace.createPlate({
+    id: "p1",
+    name: "A549-1",
+    plateSize: 6,
+    liquidPlans: [{ id: "current", name: "Old plan", createdAt: "2026-08-23T10:00:00.000Z", updatedAt: "2026-08-23T10:00:00.000Z" }],
+  });
+  const published = Workspace.publishLiquidPlan(plate, { id: "ignored-new-id", name: "Updated plan", updatedAt: "2026-08-23T11:00:00.000Z" });
+
+  assert.equal(published.liquidPlans.length, 1);
+  assert.equal(Workspace.currentLiquidPlan(published).id, "current");
+  assert.equal(Workspace.currentLiquidPlan(published).name, "Updated plan");
+  assert.equal(Workspace.currentLiquidPlan(published).createdAt, "2026-08-23T10:00:00.000Z");
+  assert.equal(plate.liquidPlans[0].name, "Old plan");
+});
+
+test("marking and clearing the current liquid plan cannot revive archived plans", () => {
+  const plate = Workspace.createPlate({ id: "p1", liquidPlans: [{ id: "current", stale: false }], archivedLiquidPlans: [{ id: "archived" }] });
+  const stale = Workspace.markLiquidPlanStale(plate);
+  assert.equal(Workspace.currentLiquidPlan(stale).stale, true);
+  assert.equal(Workspace.currentLiquidPlan(stale).status, "stale");
+  assert.equal(Workspace.usableLiquidPlan(stale), null);
+  const cleared = Workspace.clearLiquidPlan(stale);
+  assert.equal(Workspace.currentLiquidPlan(cleared), null);
+  assert.equal(cleared.liquidPlans.length, 0);
+  assert.deepEqual(cleared.archivedLiquidPlans.map((plan) => plan.id), ["archived"]);
+});
+
 test("full and structure-only duplication preserve the agreed boundaries", () => {
   let workspace = Workspace.createWorkspace({ name: "Copy test", plateSize: 24 });
   const source = workspace.plates[0];

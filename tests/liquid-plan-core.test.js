@@ -45,6 +45,54 @@ test("cargo-free compatible tube shares a key across different siRNAs", () => {
   assert.equal(first.find((item) => item.tubeRole === "common").groupKey, second.find((item) => item.tubeRole === "common").groupKey);
 });
 
+test("preparation compatibility ignores plate and display state but keeps chemical requirements", () => {
+  const base = {
+    preset: "rnai", direction: "forward", finalVolume: "2000", complexVolume: "200",
+    stockConcentration: "10", stockUnit: "µM", targetValue: "10", targetUnit: "nM", reagentPerWell: "6",
+    protocolMode: "preset", platePresetAction: "keep", groupDimension: "treatment-a", groupRoleLines: "Mock=Mock",
+    protocolSteps: "Chinese generated display text", minimumPipetteVolume: "1", overagePercent: "10",
+  };
+  const displayOnlyDifference = {
+    ...base,
+    platePresetAction: "recalculate",
+    groupDimension: "another-internal-id",
+    groupRoleLines: "",
+    protocolSteps: "English generated display text",
+    minimumPipetteVolume: "2",
+    overagePercent: "20",
+  };
+  const first = LiquidPlan.buildTransfectionContributions({ input: base, plate: { id: "p1", name: "A549-1" }, planName: "Plan A", groups: [transfectionGroup("siFBN2-1", ["A1"])] });
+  const second = LiquidPlan.buildTransfectionContributions({ input: displayOnlyDifference, plate: { id: "p2", name: "A549-2" }, planName: "Plan B", groups: [transfectionGroup("siFBN2-1", ["B1", "B2"])] });
+
+  assert.equal(first.find((item) => item.tubeRole === "cargo").groupKey, second.find((item) => item.tubeRole === "cargo").groupKey);
+  assert.equal(first.find((item) => item.tubeRole === "common").groupKey, second.find((item) => item.tubeRole === "common").groupKey);
+});
+
+test("preparation compatibility normalizes equivalent concentration and amount units", () => {
+  const result = transfectionGroup("siFBN2-1", ["A1"]).result;
+  const micromolar = LiquidPlan.preparationCompatibility({
+    input: { preset: "rnai", direction: "forward", stockConcentration: "10", stockUnit: "µM", targetValue: "10", targetUnit: "nM", totalCargoMass: "1", totalCargoMassUnit: "µg", totalCargoAmount: "1", totalCargoAmountUnit: "nmol" },
+    result, tube: "A", tubeRole: "cargo",
+  });
+  const nanomolar = LiquidPlan.preparationCompatibility({
+    input: { preset: "rnai", direction: "forward", stockConcentration: "10000", stockUnit: "nM", targetValue: "0.01", targetUnit: "µM", totalCargoMass: "1000", totalCargoMassUnit: "ng", totalCargoAmount: "1000", totalCargoAmountUnit: "pmol" },
+    result, tube: "A", tubeRole: "cargo",
+  });
+  assert.equal(micromolar.key, nanomolar.key);
+});
+
+test("preparation compatibility separates real composition and critical handling differences", () => {
+  const input = { preset: "rnai", direction: "forward", finalVolume: "2000", complexVolume: "200", stockConcentration: "10", stockUnit: "µM", targetValue: "10", targetUnit: "nM", reagentPerWell: "6" };
+  const baseline = LiquidPlan.buildTransfectionContributions({ input, plate: { id: "p1" }, groups: [transfectionGroup("siFBN2-1", ["A1"])] });
+  const reverse = LiquidPlan.buildTransfectionContributions({ input: { ...input, direction: "reverse" }, plate: { id: "p2" }, groups: [transfectionGroup("siFBN2-1", ["A1"])] });
+  const changedGroup = transfectionGroup("siFBN2-1", ["A1"]);
+  changedGroup.result.totals.find((row) => row.component === "RNAiMAX").volumeUL = 1.2;
+  const changedComposition = LiquidPlan.buildTransfectionContributions({ input, plate: { id: "p3" }, groups: [changedGroup] });
+
+  assert.notEqual(baseline.find((item) => item.tubeRole === "cargo").groupKey, reverse.find((item) => item.tubeRole === "cargo").groupKey);
+  assert.notEqual(baseline.find((item) => item.tubeRole === "common").groupKey, changedComposition.find((item) => item.tubeRole === "common").groupKey);
+});
+
 test("Mock keeps the recipe cargo-tube role even when its cargo amount is zero", () => {
   const input = { preset: "rnai", direction: "forward", finalVolume: "2000", complexVolume: "200", reagentPerWell: "6" };
   const mock = {
@@ -188,6 +236,13 @@ test("single-plate contributions use the same canonical execution order as cross
     group.result.finalVolumeUL = 2000;
     group.result.complexVolumeUL = 200;
     group.result.cellMediumVolumeUL = 1800;
+    group.result.totals = group.result.totals.map((row) => {
+      if (row.tube === "A" && row.component === name) return { ...row, volumeUL: 2, totalVolumeUL: 2.2 };
+      if (row.tube === "A" && row.component === "Opti-MEM") return { ...row, volumeUL: 98, totalVolumeUL: 107.8 };
+      if (row.tube === "B" && row.component === "RNAiMAX") return { ...row, volumeUL: 6, totalVolumeUL: 6.6 };
+      if (row.tube === "B" && row.component === "Opti-MEM") return { ...row, volumeUL: 94, totalVolumeUL: 103.4 };
+      return row;
+    });
     if (name === "Mock") {
       group.result.cargos = [];
       group.result.totals = [

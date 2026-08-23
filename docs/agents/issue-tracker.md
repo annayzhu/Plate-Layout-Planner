@@ -16,6 +16,14 @@ Issues and specifications for this repository live in GitHub Issues. Use the `gh
 
 **PRs as a request surface: no.**
 
+## Pull requests must not close issues automatically
+
+- Use `Refs #<issue-number>` in pull request bodies.
+- Do not use `Closes`, `Fixes`, or `Resolves` for implementation pull requests.
+- A merged pull request is only one input to acceptance; it is not completion evidence.
+- Close the issue only after the acceptance gate in `docs/agents/acceptance-gate.md` passes in full.
+- If a user-visible contradiction is found after closure, reopen the issue or create a regression issue that links the partially satisfied issue; never continue reporting it as complete.
+
 ## When a skill says "publish to the issue tracker"
 
 Create a GitHub issue.
@@ -23,6 +31,10 @@ Create a GitHub issue.
 ## When a skill says "fetch the relevant ticket"
 
 Run `gh issue view <number> --comments`.
+
+## When work is ready to close
+
+Post the completed acceptance record from `docs/agents/acceptance-gate.md` as an issue comment. Close only when every row is `PASS`. `FAIL`, `BLOCKED`, `NOT RUN`, missing evidence, or stale evidence keeps the issue open.
 
 ## Triage
 

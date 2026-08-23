@@ -1315,53 +1315,72 @@
   function aggregateLiquidPlans(plates, overagePercent, maxContainerVolume = Infinity) {
     const contributions = [];
     const skipped = [];
-    for (const plate of plates) {
+    for (const [plateOrder, plate] of plates.entries()) {
       for (const plan of plate.liquidPlans || []) {
         if (plan.stale) continue;
-        if (!Array.isArray(plan.contributions) || !plan.contributions.length) skipped.push(`${plate.name} · ${plan.name || plan.module}`);
-        else contributions.push(...plan.contributions.map((item) => ({ ...item, plateId: plate.id, plateName: plate.name })));
+        const legacyTransfection = plan.module === "transfection" && plan.executionPlanVersion !== LiquidPlan.EXECUTION_PLAN_VERSION;
+        if (legacyTransfection || !Array.isArray(plan.contributions) || !plan.contributions.length) skipped.push(`${plate.name} · ${plan.name || plan.module}`);
+        else contributions.push(...plan.contributions.map((item) => ({ ...item, plateId: plate.id, plateName: plate.name, displayOrder: plateOrder * 10000 + (Number(item.displayOrder) || 0) })));
       }
     }
     return { merged: Workspace.mergeLiquidContributions(contributions, { overagePercent, minPipetteVolume: 1, maxContainerVolume }), skipped, contributionCount: contributions.length };
   }
 
+  function buildOperatorExecutionPlan(groups) {
+    const transfection = LiquidPlan.buildTransfectionExecutionPlan({ groups, language });
+    const otherPreparations = (groups || []).filter((group) => !["cargo", "common"].includes(group.tubeRole)).map((group) => ({
+      role: group.tubeRole || "standard",
+      label: LiquidPlan.safeDisplayLabel(group.label),
+      cargoIdentity: "",
+      components: (group.components || []).map((component) => ({ ...component })),
+      sources: (group.sources || []).map((source) => ({ ...source })),
+      wellCount: (group.sources || []).reduce((sum, source) => sum + (source.scopeWellIds || []).length, 0),
+      warning: (group.components || []).some((component) => component.warning) ? "below-minimum-pipette-volume" : "",
+    })).filter((item) => item.label);
+    const otherSteps = otherPreparations.map((item, index) => ({
+      sequence: transfection.steps.length + index + 1,
+      phase: "prepare-standard",
+      cargoIdentity: "",
+      label: item.label,
+      sources: item.sources,
+      action: bilingual(`按配液表准备 ${item.label}。`, `Prepare ${item.label} according to the preparation table.`),
+      perWellVolume: 0,
+      target: item.sources.map((source) => `${source.plateName || source.plateId}: ${(source.scopeWellIds || []).join(", ")}`).join("；"),
+    }));
+    return { version: LiquidPlan.EXECUTION_PLAN_VERSION, preparations: [...transfection.preparations, ...otherPreparations], steps: [...transfection.steps, ...otherSteps] };
+  }
+
   function renderProjectLiquidSummary(summary) {
     if (!summary) { elements.projectLiquidSummary.innerHTML = ""; return; }
-    const rows = summary.groups.flatMap((group) => group.components.map((component) => [
-      group.tubeRole === "cargo" ? bilingual("目的物管", "Cargo tube") : group.tubeRole === "common" ? bilingual("公共预混液", "Common premix") : bilingual("配液", "Preparation"),
-      group.label || group.key,
-      component.name,
-      (group.sources || group.plates || []).map((source) => `${source.plateName || source.plateId}${source.scopeWellIds?.length ? ` · ${source.scopeWellIds.join(", ")}` : ""}`).join("；"),
-      component.perWellVolume ? `${liquidNumber(component.perWellVolume)} µL` : "",
-      `${liquidNumber(component.baseVolume)} µL`,
-      `${liquidNumber(component.preparedVolume)} µL`,
-      String(component.containerCount),
-      component.warning ? bilingual("存在移液量低于 1 µL", "A transfer is below 1 µL") : "",
-    ]));
+    const plan = summary.executionPlan;
+    if (!plan || plan.version !== LiquidPlan.EXECUTION_PLAN_VERSION) {
+      elements.projectLiquidSummary.innerHTML = `<div class="project-liquid-summary-note warning">${escapeHtml(bilingual("这份汇总来自旧版本。请点击“生成汇总”重新生成操作员执行计划。", "This summary is from an earlier version. Choose Build summary to regenerate the operator execution plan."))}</div>`;
+      return;
+    }
     const skipped = summary.skipped?.length ? `<div class="project-liquid-summary-note warning">${escapeHtml(bilingual(`有 ${summary.skipped.length} 个旧方案没有可合并明细，请重新打开计算并保存：${summary.skipped.join("；")}`, `${summary.skipped.length} legacy plans have no mergeable detail; recalculate and save them: ${summary.skipped.join("; ")}`))}</div>` : "";
-    const note = `<div class="project-liquid-summary-note">${escapeHtml(bilingual(`已汇总 ${summary.plateNames.length} 块板；按实际配液管合并兼容需求，再统一加入 ${summary.overagePercent}% 余量。目的物管按 siRNA/目的物身份计算，不按板号计算。`, `${summary.plateNames.length} plates summarized by physical preparation tube with one ${summary.overagePercent}% overage. Cargo tubes are grouped by cargo identity, never by plate name.`))}</div>`;
-    const cargoTubes = summary.groups.filter((group) => group.tubeRole === "cargo").length;
-    const commonTubes = summary.groups.filter((group) => group.tubeRole === "common").length;
-    const overview = rows.length ? `<div class="project-liquid-summary-overview"><div class="project-liquid-summary-stat"><strong>${summary.plateNames.length}</strong><span>${bilingual("块板", "plates")}</span></div><div class="project-liquid-summary-stat"><strong>${cargoTubes}</strong><span>${bilingual("目的物管", "cargo tubes")}</span></div><div class="project-liquid-summary-stat"><strong>${commonTubes}</strong><span>${bilingual("公共预混管", "common tubes")}</span></div></div>` : "";
-    const actions = rows.length ? `<div class="project-liquid-summary-actions"><button type="button" class="primary-button" data-open-liquid-summary>${bilingual("查看完整汇总与导出", "View full summary & export")}</button></div>` : "";
-    const empty = rows.length ? "" : `<div class="project-liquid-summary-note warning">${escapeHtml(bilingual("所选板没有可汇总的已保存配液方案。", "The selected plates have no saved liquid plans that can be summarized."))}</div>`;
+    const note = `<div class="project-liquid-summary-note">${escapeHtml(bilingual(`已汇总 ${summary.plateNames.length} 块板；先列出全部独立处理液，再列出可安全共用的公共液，并统一加入 ${summary.overagePercent}% 余量。`, `${summary.plateNames.length} plates summarized. Treatment-specific preparations come first, followed by safely shareable mixtures, with one ${summary.overagePercent}% overage.`))}</div>`;
+    const cargoTubes = plan.preparations.filter((item) => item.role === "cargo").length;
+    const commonTubes = plan.preparations.filter((item) => item.role === "common").length;
+    const overview = plan.preparations.length ? `<div class="project-liquid-summary-overview"><div class="project-liquid-summary-stat"><strong>${summary.plateNames.length}</strong><span>${bilingual("块板", "plates")}</span></div><div class="project-liquid-summary-stat"><strong>${cargoTubes}</strong><span>${bilingual("独立处理液", "treatment mixes")}</span></div><div class="project-liquid-summary-stat"><strong>${commonTubes}</strong><span>${bilingual("公共液", "shared mixes")}</span></div></div>` : "";
+    const actions = plan.preparations.length ? `<div class="project-liquid-summary-actions"><button type="button" class="primary-button" data-open-liquid-summary>${bilingual("查看配制表、执行顺序与导出", "View preparation, execution & export")}</button></div>` : "";
+    const empty = plan.preparations.length ? "" : `<div class="project-liquid-summary-note warning">${escapeHtml(bilingual("所选板没有可汇总的已保存配液方案。", "The selected plates have no saved liquid plans that can be summarized."))}</div>`;
     elements.projectLiquidSummary.innerHTML = note + skipped + overview + empty + actions;
   }
 
   function fullLiquidSummaryTable(summary) {
-    const rows = summary.groups.flatMap((group) => group.components.map((component) => [
-      group.tubeRole === "cargo" ? bilingual("目的物管", "Cargo tube") : bilingual("公共预混液", "Common premix"), group.label || group.key, component.name,
-      (group.sources || []).map((source) => `${source.plateName || source.plateId}${source.scopeWellIds?.length ? ` · ${source.scopeWellIds.join(", ")}` : ""}`).join("；"),
-      component.perWellVolume ? `${liquidNumber(component.perWellVolume)} µL` : "", `${liquidNumber(component.baseVolume)} µL`, `${liquidNumber(component.preparedVolume)} µL`, String(component.containerCount),
-      component.warning ? bilingual("存在移液量低于 1 µL", "A transfer is below 1 µL") : "",
-    ]));
-    return `<div class="project-liquid-table-wrap"><table class="liquid-table"><thead><tr>${[bilingual("配液类型", "Preparation type"), bilingual("配液管", "Tube"), bilingual("组分", "Component"), bilingual("覆盖板与孔", "Plates and wells"), bilingual("每孔", "Per well"), bilingual("基础需求", "Base need"), bilingual("建议准备", "Prepare"), bilingual("容器数", "Containers"), bilingual("提示", "Note")].map((item) => `<th>${item}</th>`).join("")}</tr></thead><tbody>${rows.map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
+    const preparationRows = summaryRowsForExport(summary).slice(1);
+    const executionRows = pipettingRowsForSummary(summary).slice(1);
+    const preparationHeaders = summaryRowsForExport(summary)[0];
+    const executionHeaders = pipettingRowsForSummary(summary)[0];
+    const table = (headers, rows, className) => `<div class="project-liquid-table-wrap"><table class="liquid-table ${className}"><thead><tr>${headers.map((item) => `<th>${escapeHtml(item)}</th>`).join("")}</tr></thead><tbody>${rows.map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
+    return `<section class="operator-summary-section"><div class="operator-summary-heading"><span>01</span><div><h3>${bilingual("需要配制什么", "What to prepare")}</h3><p>${bilingual("独立处理液按首次出现顺序排列，公共液仅在确认兼容后合并。", "Treatment-specific preparations follow first appearance; shared mixes merge only when compatible.")}</p></div></div>${table(preparationHeaders, preparationRows, "operator-preparation-table")}</section>` +
+      `<section class="operator-summary-section"><div class="operator-summary-heading"><span>02</span><div><h3>${bilingual("按照什么顺序操作", "Execution order")}</h3><p>${bilingual("先完成全部独立处理液，再配公共液、混合孵育并按方向加样。", "Prepare all treatment mixes first, then shared mixes, incubation, and direction-specific dosing.")}</p></div></div>${table(executionHeaders, executionRows, "operator-execution-table")}</section>`;
   }
 
   function openSummaryDrawer() {
     const summary = workspace.latestLiquidSummary;
-    if (!summary?.groups?.length) return;
-    elements.summaryDrawerMeta.textContent = bilingual(`${summary.plateNames.length} 块板 · ${summary.groups.length} 个物理配液管 · ${summary.overagePercent}% 统一余量`, `${summary.plateNames.length} plates · ${summary.groups.length} physical tubes · ${summary.overagePercent}% shared overage`);
+    if (!summary?.executionPlan?.preparations?.length) return;
+    elements.summaryDrawerMeta.textContent = bilingual(`${summary.plateNames.length} 块板 · ${summary.executionPlan.preparations.length} 项配制 · ${summary.executionPlan.steps.length} 个执行步骤`, `${summary.plateNames.length} plates · ${summary.executionPlan.preparations.length} preparations · ${summary.executionPlan.steps.length} execution steps`);
     elements.summaryDrawerActions.innerHTML = `<button type="button" class="secondary-button" data-project-liquid-export="copy">${bilingual("复制汇总", "Copy summary")}</button><button type="button" class="secondary-button" data-project-liquid-export="csv">${bilingual("导出汇总 CSV", "Export summary CSV")}</button><button type="button" class="primary-button" data-project-liquid-export="xlsx">${bilingual("导出汇总 XLSX", "Export summary XLSX")}</button>`;
     elements.summaryDrawerContent.innerHTML = fullLiquidSummaryTable(summary);
     elements.summaryDrawer.hidden = false;
@@ -2538,14 +2557,17 @@
     const capacityValue = Number(elements.projectLiquidContainerCapacity.value);
     const maxContainerVolume = Number.isFinite(capacityValue) && capacityValue > 0 ? capacityValue : Infinity;
     const { merged, skipped } = aggregateLiquidPlans(plates, overagePercent, maxContainerVolume);
+    const executionPlan = buildOperatorExecutionPlan(merged.groups);
     workspace.latestLiquidSummary = {
       id: `liquid_summary_${Date.now().toString(36)}`,
+      executionPlanVersion: LiquidPlan.EXECUTION_PLAN_VERSION,
       createdAt: new Date().toISOString(),
       plateIds: plates.map((plate) => plate.id),
       plateNames: plates.map((plate) => plate.name),
       overagePercent,
       maxContainerVolume: Number.isFinite(maxContainerVolume) ? maxContainerVolume : null,
       groups: merged.groups,
+      executionPlan,
       skipped,
     };
     saveProject();
@@ -2559,8 +2581,8 @@
     }
     const button = event.target.closest("[data-project-liquid-export]");
     const summary = workspace.latestLiquidSummary;
-    if (!button || !summary?.groups?.length) return;
-    const rows = summaryRowsForExport(summary);
+    if (!button || !summary?.executionPlan?.preparations?.length) return;
+    const rows = operatorSummaryRows(summary);
     if (button.dataset.projectLiquidExport === "copy") {
       try {
         await navigator.clipboard.writeText(rows.map((row) => row.join("\t")).join("\n"));
@@ -2937,6 +2959,7 @@
       plateId: project.id,
       plateName: project.name,
       plateSize: project.plateSize,
+      executionPlanVersion: activeLiquidModule === "transfection" ? LiquidPlan.EXECUTION_PLAN_VERSION : undefined,
       scopeWellIds: liquidTargetWellIds(),
       input: savedInput,
       resultSnapshot: { headers: lastLiquidResult.headers, rows: lastLiquidResult.rows, warnings: lastLiquidResult.warnings || [], checklist: lastLiquidResult.checklist || [], executionGroups: lastLiquidResult.executionGroups || [] },
@@ -3056,20 +3079,20 @@
   }
 
   function summaryRowsForExport(summary, roleFilter = "") {
-    const rows = [[bilingual("配液类型", "Preparation type"), bilingual("配液管", "Tube"), bilingual("目的物/分组", "Cargo / group"), bilingual("组分", "Component"), bilingual("每孔用量", "Per well"), bilingual("基础需求量", "Base need"), bilingual("统一余量", "Shared overage"), bilingual("建议准备量", "Suggested preparation"), bilingual("覆盖板", "Source plates"), bilingual("目标孔", "Target wells"), bilingual("方案", "Plan"), bilingual("容器数", "Containers"), bilingual("操作步骤", "Protocol steps"), bilingual("提示", "Note")]];
-    for (const group of summary?.groups || []) {
-      if (roleFilter && group.tubeRole !== roleFilter) continue;
-      const sources = group.sources || [];
+    const rows = [[bilingual("配液类别", "Preparation category"), bilingual("处理/配液名称", "Treatment / preparation"), bilingual("目的物/分组", "Cargo / group"), bilingual("组分", "Component"), bilingual("每孔用量", "Per well"), bilingual("覆盖孔数", "Covered wells"), bilingual("基础需求量", "Base need"), bilingual("统一余量", "Shared overage"), bilingual("建议准备量", "Suggested preparation"), bilingual("覆盖板", "Source plates"), bilingual("目标孔", "Target wells"), bilingual("方案", "Plan"), bilingual("容器数", "Containers"), bilingual("提示", "Note")]];
+    for (const preparation of summary?.executionPlan?.preparations || []) {
+      if (roleFilter && preparation.role !== roleFilter) continue;
+      const sources = preparation.sources || [];
       const plates = [...new Set(sources.map((source) => source.plateName || source.plateId))].join("；");
       const wells = sources.map((source) => `${source.plateName || source.plateId}: ${(source.scopeWellIds || []).join(", ")}`).join("；");
-      const plans = [...new Set([...(group.recipeNames || []), ...sources.map((source) => source.planName).filter(Boolean)])].join("；");
-      const protocols = [...new Set(sources.flatMap((source) => source.protocolSteps || []).filter(Boolean))].join(" → ");
-      for (const component of group.components || []) rows.push([
-        group.tubeRole === "cargo" ? bilingual("目的物管", "Cargo tube") : group.tubeRole === "common" ? bilingual("公共预混液", "Common premix") : bilingual("配液", "Preparation"),
-        group.tube || group.label || "",
-        group.cargoIdentity || group.label || "",
+      const plans = [...new Set(sources.map((source) => source.planName).filter(Boolean))].join("；");
+      for (const component of preparation.components || []) rows.push([
+        preparation.role === "cargo" ? bilingual("独立处理液", "Treatment-specific mix") : preparation.role === "common" ? bilingual("公共液", "Shared mix") : bilingual("其他配液", "Other preparation"),
+        preparation.label,
+        preparation.cargoIdentity || preparation.label,
         component.name,
         component.perWellVolume ? `${liquidNumber(component.perWellVolume)} µL` : "",
+        preparation.wellCount,
         `${liquidNumber(component.baseVolume)} µL`,
         `${summary.overagePercent}%`,
         `${liquidNumber(component.preparedVolume)} µL`,
@@ -3077,43 +3100,54 @@
         wells,
         plans,
         component.containerCount,
-        protocols,
-        component.warning ? bilingual("存在移液量低于 1 µL", "A transfer is below 1 µL") : "",
+        [component.warning ? bilingual("存在移液量低于 1 µL", "A transfer is below 1 µL") : "", component.containerCount > 1 ? bilingual(`分装 ${component.containerCount} 个容器`, `Split across ${component.containerCount} containers`) : ""].filter(Boolean).join("；"),
       ]);
     }
     return rows;
   }
 
   function pipettingRowsForSummary(summary) {
-    const rows = [[bilingual("执行顺序", "Step"), bilingual("配液类型", "Preparation type"), bilingual("配液管", "Tube"), bilingual("目的物/分组", "Cargo / group"), bilingual("组分", "Component"), bilingual("来源容器或母液", "Source container / stock"), bilingual("目标板", "Target plate"), bilingual("目标孔", "Target well"), bilingual("每孔加入体积", "Volume per well"), bilingual("基础需求量", "Base need"), bilingual("建议准备量（含余量）", "Suggested preparation incl. overage"), bilingual("实际加入量", "Actual volume"), bilingual("完成状态", "Done"), bilingual("操作者", "Operator"), bilingual("时间", "Time"), bilingual("备注", "Notes")]];
-    let step = 1;
-    for (const group of summary?.groups || []) for (const component of group.components || []) {
-      const sources = group.sources || [];
+    const phaseLabels = {
+      "prepare-cargo": bilingual("准备独立处理液", "Prepare treatment mix"),
+      "prepare-common": bilingual("准备公共液", "Prepare shared mix"),
+      "combine-incubate": bilingual("混合与孵育", "Combine and incubate"),
+      "add-medium": bilingual("加入培养基", "Add medium"),
+      "add-complex": bilingual("加入复合物", "Add complex"),
+      "add-cells": bilingual("加入细胞悬液", "Add cell suspension"),
+      "prepare-standard": bilingual("准备其他配液", "Prepare other solution"),
+    };
+    const rows = [[bilingual("执行顺序", "Step"), bilingual("阶段", "Phase"), bilingual("操作", "Action"), bilingual("目的物/分组", "Cargo / group"), bilingual("目标板", "Target plate"), bilingual("目标孔", "Target well"), bilingual("每孔操作体积", "Action volume per well"), bilingual("实际加入量", "Actual volume"), bilingual("完成状态", "Done"), bilingual("操作者", "Operator"), bilingual("时间", "Time"), bilingual("备注", "Notes")]];
+    for (const step of summary?.executionPlan?.steps || []) {
+      const sources = step.sources || [];
       rows.push([
-        step,
-        group.tubeRole === "cargo" ? bilingual("目的物管", "Cargo tube") : bilingual("公共预混液", "Common premix"),
-        group.tube || group.label || "",
-        group.cargoIdentity || group.label || "",
-        component.name,
-        bilingual("按配液表配制", "Prepare from liquid sheet"),
+        step.sequence,
+        phaseLabels[step.phase] || step.phase,
+        step.action,
+        step.cargoIdentity || "",
         [...new Set(sources.map((source) => source.plateName || source.plateId))].join("；"),
         sources.map((source) => `${source.plateName || source.plateId}: ${(source.scopeWellIds || []).join(", ")}`).join("；"),
-        component.perWellVolume ? `${liquidNumber(component.perWellVolume)} µL` : "",
-        `${liquidNumber(component.baseVolume)} µL`,
-        `${liquidNumber(component.preparedVolume)} µL`,
-        "", "□", "", "",
-        component.containerCount > 1 ? bilingual(`分装 ${component.containerCount} 管`, `Split across ${component.containerCount} containers`) : "",
+        step.perWellVolume ? `${liquidNumber(step.perWellVolume)} µL` : "",
+        "", "□", "", "", "",
       ]);
-      step += 1;
     }
     return rows;
   }
 
+  function operatorSummaryRows(summary) {
+    return [
+      [bilingual("需要配制什么", "What to prepare")],
+      ...summaryRowsForExport(summary),
+      [],
+      [bilingual("按照什么顺序操作", "Execution order")],
+      ...pipettingRowsForSummary(summary),
+    ];
+  }
+
   function liquidSummaryWorkbookSheets(summary) {
     return [
+      { name: bilingual("独立处理液", "Treatment mixes"), systemKind: "liquid-cargo", rows: summaryRowsForExport(summary, "cargo"), freezeRows: 1, autoFilter: true },
       { name: bilingual("跨板公共液", "Cross-plate common mixes"), systemKind: "liquid-common", rows: summaryRowsForExport(summary, "common"), freezeRows: 1, autoFilter: true },
-      { name: bilingual("独立目的物管", "Cargo-specific tubes"), systemKind: "liquid-cargo", rows: summaryRowsForExport(summary, "cargo"), freezeRows: 1, autoFilter: true },
-      { name: bilingual("逐步加样清单", "Pipetting checklist"), systemKind: "pipetting", rows: pipettingRowsForSummary(summary), freezeRows: 1, autoFilter: true },
+      { name: bilingual("逐步执行清单", "Execution checklist"), systemKind: "pipetting", rows: pipettingRowsForSummary(summary), freezeRows: 1, autoFilter: true },
     ];
   }
 
@@ -3157,7 +3191,7 @@
       sheets.push({ name: `${plate.name}-${bilingual("配液", "liquid")}`, systemKind: "plate-liquid", rows: preparationRows, freezeRows: 1, autoFilter: true });
     }
     const liquidSummary = workspace.latestLiquidSummary;
-    if (liquidSummary?.groups?.length) sheets.push(...liquidSummaryWorkbookSheets(liquidSummary));
+    if (liquidSummary?.executionPlan?.preparations?.length) sheets.push(...liquidSummaryWorkbookSheets(liquidSummary));
     else sheets.push({ name: bilingual("跨板配液未生成", "No liquid summary"), systemKind: "liquid-empty", rows: [[bilingual("请先从已保存且有效的配液方案生成跨板汇总。", "Build a cross-plate summary from current saved plans first.")]] });
     return sheets;
   }

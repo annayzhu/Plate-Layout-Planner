@@ -539,6 +539,18 @@ label > span { display: block; margin-bottom: 5px; color: var(--muted); font-siz
 .summary-drawer-content .liquid-table { min-width: 1120px; }
 .summary-drawer-content .liquid-table td:nth-child(4) { min-width: 260px; white-space: normal; overflow-wrap: anywhere; }
 .summary-drawer-content .liquid-table th { top: 0; }
+.operator-summary-section { display: grid; gap: 11px; min-width: 0; padding: 16px; border: 1px solid var(--line); border-radius: 14px; background: #fff; box-shadow: var(--shadow-soft); }
+.operator-summary-section + .operator-summary-section { margin-top: 16px; }
+.operator-summary-heading { display: flex; align-items: flex-start; gap: 11px; }
+.operator-summary-heading > span { display: grid; flex: 0 0 30px; height: 30px; place-items: center; border-radius: 9px; background: var(--pine); color: #fff; font-size: var(--type-meta); font-weight: 900; }
+.operator-summary-heading h3 { margin: 0; color: var(--ink); font-size: 18px; letter-spacing: -.02em; }
+.operator-summary-heading p { margin: 3px 0 0; color: var(--muted); font-size: var(--type-caption); line-height: 1.5; }
+.summary-drawer-content .operator-preparation-table { min-width: 1420px; }
+.summary-drawer-content .operator-execution-table { min-width: 1280px; }
+.summary-drawer-content .operator-preparation-table td:nth-child(2),
+.summary-drawer-content .operator-preparation-table td:nth-child(11),
+.summary-drawer-content .operator-execution-table td:nth-child(3),
+.summary-drawer-content .operator-execution-table td:nth-child(6) { min-width: 220px; white-space: normal; overflow-wrap: anywhere; }
 
 .project-file-dialog { grid-template-columns: minmax(80px,1fr) minmax(620px,820px); }
 .project-file-panel { grid-template-rows: auto minmax(0,1fr); }

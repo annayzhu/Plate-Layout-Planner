@@ -196,7 +196,11 @@
       if (!factor || !Number.isFinite(base) || base < 0 || !item.groupKey || !item.component) continue;
       if (!groups.has(item.groupKey)) groups.set(item.groupKey, {
         key: item.groupKey,
-        label: item.groupLabel || item.groupKey,
+        label: item.groupLabel || "",
+        module: item.module || "",
+        executionPlanVersion: item.executionPlanVersion || null,
+        compatibilityKey: item.compatibilityKey || "",
+        displayOrder: Number.isFinite(Number(item.displayOrder)) ? Number(item.displayOrder) : Number.MAX_SAFE_INTEGER,
         tubeRole: item.tubeRole || "standard",
         tube: item.tube || "",
         cargoIdentity: item.cargoIdentity || "",
@@ -207,6 +211,7 @@
         warnings: [],
       });
       const group = groups.get(item.groupKey);
+      if (Number.isFinite(Number(item.displayOrder))) group.displayOrder = Math.min(group.displayOrder, Number(item.displayOrder));
       if (!group.plates.has(item.plateId)) group.plates.set(item.plateId, { plateId: item.plateId, plateName: item.plateName || item.plateId });
       if (item.planName) group.recipeNames.add(item.planName);
       const sourceKey = `${item.plateId}\u0000${item.planName || ""}\u0000${item.groupName || ""}`;
@@ -217,6 +222,14 @@
         groupName: item.groupName || "",
         scopeWellIds: Array.isArray(item.scopeWellIds) ? [...item.scopeWellIds] : [],
         protocolSteps: Array.isArray(item.protocolSteps) ? [...item.protocolSteps] : [],
+        displayOrder: Number.isFinite(Number(item.displayOrder)) ? Number(item.displayOrder) : Number.MAX_SAFE_INTEGER,
+        direction: item.direction === "reverse" ? "reverse" : "forward",
+        preset: item.preset || "",
+        protocolMode: item.protocolMode || "preset",
+        finalVolumeUL: Number(item.finalVolumeUL) || 0,
+        complexVolumeUL: Number(item.complexVolumeUL) || 0,
+        cellMediumVolumeUL: Number(item.cellMediumVolumeUL) || 0,
+        incubationMinutes: item.incubationMinutes === null ? null : Number(item.incubationMinutes) || null,
       });
       const component = group.components.get(item.component) || { name: item.component, baseVolume: 0, unit: "µL", perWellVolume: Number(item.perWellVolume) || 0, perPlate: [] };
       const volume = base * factor;
@@ -229,6 +242,10 @@
       groups: [...groups.values()].map((group) => ({
         key: group.key,
         label: group.label,
+        module: group.module,
+        executionPlanVersion: group.executionPlanVersion,
+        compatibilityKey: group.compatibilityKey,
+        displayOrder: group.displayOrder,
         tubeRole: group.tubeRole,
         tube: group.tube,
         cargoIdentity: group.cargoIdentity,

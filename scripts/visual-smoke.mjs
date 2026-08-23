@@ -800,12 +800,12 @@ try {
   await page.locator("[data-open-liquid-summary]").click();
   const fullSummaryText = await page.locator("#summaryDrawerContent").innerText();
   if (!fullSummaryText.includes("Legacy project") || !fullSummaryText.includes("Legacy copy")) throw new Error(`The full summary lost source-plate provenance: ${fullSummaryText}`);
-  const containerCounts = await page.locator("#summaryDrawerContent .liquid-table tbody tr td:nth-child(8)").allInnerTexts();
-  if (!containerCounts.some((value) => Number(value) > 1)) throw new Error(`Container-capacity splitting was not exposed in the project summary: ${containerCounts.join(", ")}`);
+  const preparationNotes = await page.locator("#summaryDrawerContent .operator-preparation-table tbody tr td:last-child").allInnerTexts();
+  if (!preparationNotes.some((value) => value.includes("分装"))) throw new Error(`Container-capacity splitting was not exposed in the project summary: ${preparationNotes.join(", ")}`);
   const sideWidthAfterSummary = await page.locator(".side-stack").evaluate((element) => element.getBoundingClientRect().width);
   if (Math.abs(sideWidthAfterSummary - sideWidthBeforeSummary) > 1) throw new Error(`The execution summary changed the sidebar width: ${sideWidthBeforeSummary}px -> ${sideWidthAfterSummary}px`);
-  const summaryScroll = await page.locator("#summaryDrawerContent .project-liquid-table-wrap").evaluate((element) => ({ client: element.clientWidth, scroll: element.scrollWidth }));
-  if (summaryScroll.scroll <= summaryScroll.client) throw new Error(`Full summary does not expose an internal horizontal scroll region: ${JSON.stringify(summaryScroll)}`);
+  const summaryScroll = await page.locator("#summaryDrawerContent .project-liquid-table-wrap").evaluateAll((elements) => elements.map((element) => ({ client: element.clientWidth, scroll: element.scrollWidth })));
+  if (!summaryScroll.length || summaryScroll.some((item) => item.scroll <= item.client)) throw new Error(`Full summary does not expose internal horizontal scroll regions: ${JSON.stringify(summaryScroll)}`);
   if (await page.locator('#summaryDrawerActions [data-project-liquid-export="copy"], #summaryDrawerActions [data-project-liquid-export="csv"], #summaryDrawerActions [data-project-liquid-export="xlsx"]').count() !== 3) {
     throw new Error("Cross-plate summary does not expose copy, CSV, and XLSX actions together.");
   }
@@ -817,10 +817,75 @@ try {
   await page.locator('[data-project-liquid-export="xlsx"]').click();
   const summaryXlsxDownload = await summaryXlsxDownloadPromise;
   const summaryWorkbook = await XlsxCore.parseWorkbook(await readFile(await summaryXlsxDownload.path()));
-  for (const expectedSheet of ["跨板公共液", "独立目的物管", "逐步加样清单"]) {
+  for (const expectedSheet of ["跨板公共液", "独立处理液", "逐步执行清单"]) {
     if (!summaryWorkbook.sheets.some((sheet) => sheet.name === expectedSheet)) throw new Error(`Summary workbook is missing ${expectedSheet}.`);
   }
   await page.screenshot({ path: resolve(outputDirectory, "07-cross-plate-liquid-summary.png"), fullPage: true });
+  await page.locator("#closeSummaryDrawerButton").click();
+
+  const treatmentFixtures = [
+    [["A1", "Mock"], ["A2", "NC-FAM"], ["B1", "siFBN2-1"]],
+    [["A1", "siFBN2-2"], ["A2", "siFBN2-3"], ["B1", "siFBN2-4"]],
+  ];
+  for (const [plateIndex, assignments] of treatmentFixtures.entries()) {
+    await page.locator(".plate-tab").nth(plateIndex).click();
+    await page.locator("#newDimensionName").fill("处理");
+    await page.locator("#newDimensionName").press("Enter");
+    const treatmentInput = page.locator(".parameter-input-row").filter({ hasText: "处理" });
+    for (const [wellId, value] of assignments) {
+      await page.locator(`[data-well="${wellId}"]`).click();
+      await treatmentInput.locator(".parameter-value").fill(value);
+      await page.locator("#applyParametersButton").click();
+    }
+    await page.locator('[data-well="A1"]').click();
+    await page.locator('[data-well="A2"]').click({ modifiers: ["Control"] });
+    await page.locator('[data-well="B1"]').click({ modifiers: ["Control"] });
+    await page.locator('.liquid-module-launch[data-liquid-module="transfection"]').click();
+    await page.locator('#liquidActiveForm [name="groupDimension"]').selectOption({ label: "处理" });
+    if (plateIndex === 0) await page.locator('#liquidActiveForm [name="groupRoleLines"]').fill("Mock=Mock");
+    await page.locator('#liquidActiveForm button[type="submit"]').click();
+    await page.locator('[data-liquid-action="save"]').click();
+    await page.locator("#closeLiquidDrawerButton").click();
+  }
+  await page.locator("#projectLiquidScope").selectOption("all");
+  await page.locator("#projectLiquidSummaryButton").click();
+  await page.locator("[data-open-liquid-summary]").click();
+  const transfectionSummaryText = await page.locator("#summaryDrawerContent").innerText();
+  if (transfectionSummaryText.includes("transfection:{") || transfectionSummaryText.includes('"cargoLines"')) throw new Error(`Internal recipe keys leaked into the operator summary: ${transfectionSummaryText.slice(0, 500)}`);
+  const preparationLabels = await page.locator("#summaryDrawerContent .operator-preparation-table tbody tr td:nth-child(2)").allInnerTexts();
+  const uniquePreparationLabels = preparationLabels.filter((value, index) => index === 0 || value !== preparationLabels[index - 1]);
+  const expectedTreatmentOrder = ["Mock · A", "NC-FAM · A", "siFBN2-1 · A", "siFBN2-2 · A", "siFBN2-3 · A", "siFBN2-4 · A", "RNAiMAX + siRNA · B"];
+  if (uniquePreparationLabels.slice(0, expectedTreatmentOrder.length).join("|") !== expectedTreatmentOrder.join("|")) {
+    throw new Error(`Treatment preparations did not preserve first appearance before the shared mix: ${uniquePreparationLabels.join(" | ")}`);
+  }
+  const executionPhases = await page.locator("#summaryDrawerContent .operator-execution-table tbody tr td:nth-child(2)").allInnerTexts();
+  const expectedPhasePrefix = [
+    ...Array(6).fill("准备独立处理液"),
+    "准备公共液",
+    ...Array(6).fill("混合与孵育"),
+    "加入培养基",
+    ...Array(6).fill("加入复合物"),
+  ];
+  if (executionPhases.slice(0, expectedPhasePrefix.length).join("|") !== expectedPhasePrefix.join("|")) {
+    throw new Error(`Transfection execution dependencies were incorrect: ${executionPhases.join(" | ")}`);
+  }
+  const operatorCsvPromise = page.waitForEvent("download");
+  await page.locator('[data-project-liquid-export="csv"]').click();
+  const operatorCsvDownload = await operatorCsvPromise;
+  const operatorCsv = await readFile(await operatorCsvDownload.path(), "utf8");
+  if (operatorCsv.includes("transfection:{") || operatorCsv.includes('"cargoLines"')) throw new Error("Internal recipe keys leaked into the operator CSV.");
+  const operatorXlsxPromise = page.waitForEvent("download");
+  await page.locator('[data-project-liquid-export="xlsx"]').click();
+  const operatorXlsxDownload = await operatorXlsxPromise;
+  const operatorWorkbook = await XlsxCore.parseWorkbook(await readFile(await operatorXlsxDownload.path()));
+  const treatmentSheet = operatorWorkbook.sheets.find((sheet) => sheet.name === "独立处理液");
+  const exportedTreatmentLabels = (treatmentSheet?.rows || []).slice(1).map((row) => String(row[1] || "")).filter((value, index, values) => value && (index === 0 || value !== values[index - 1]));
+  if (exportedTreatmentLabels.slice(0, 6).join("|") !== expectedTreatmentOrder.slice(0, 6).join("|")) throw new Error(`Operator XLSX treatment order was incorrect: ${exportedTreatmentLabels.join(" | ")}`);
+  const executionSheet = operatorWorkbook.sheets.find((sheet) => sheet.name === "逐步执行清单");
+  const exportedPhases = (executionSheet?.rows || []).slice(1).map((row) => String(row[1] || ""));
+  if (exportedPhases.slice(0, expectedPhasePrefix.length).join("|") !== expectedPhasePrefix.join("|")) throw new Error(`Operator XLSX execution order was incorrect: ${exportedPhases.join(" | ")}`);
+  if (JSON.stringify(operatorWorkbook).includes("transfection:{")) throw new Error("Internal recipe keys leaked into the operator XLSX.");
+  await page.screenshot({ path: resolve(outputDirectory, "07b-transfection-operator-plan.png"), fullPage: true });
   await page.locator("#closeSummaryDrawerButton").click();
 
   await page.locator("#overviewToggleButton").click();
@@ -837,7 +902,7 @@ try {
   if (xlsxBytes[0] !== 0x50 || xlsxBytes[1] !== 0x4b) throw new Error("Multi-plate export is not a real XLSX ZIP workbook.");
   const parsedWorkbook = await XlsxCore.parseWorkbook(xlsxBytes);
   const exportedSheetNames = parsedWorkbook.sheets.map((sheet) => sheet.name);
-  for (const expectedSheet of ["实验总览", "Legacy project-配液", "Legacy copy-配液", "跨板公共液", "独立目的物管", "逐步加样清单"]) {
+  for (const expectedSheet of ["实验总览", "Legacy project-配液", "Legacy copy-配液", "跨板公共液", "独立处理液", "逐步执行清单"]) {
     if (!parsedWorkbook.sheets.some((sheet) => sheet.name === expectedSheet)) throw new Error(`Execution workbook is missing ${expectedSheet}; exported: ${exportedSheetNames.join(" | ")}.`);
   }
   const overviewSheet = parsedWorkbook.sheets.find((sheet) => sheet.name === "实验总览");
@@ -927,6 +992,7 @@ try {
     spreadsheetImport: "Excel-compatible CSV created a 12-well plate with units and quoted values",
     multiPlateWorkspace: "same-format plates stayed isolated; overview, duplication, deletion, project undo, persistence, and XLSX round-trip passed",
     crossPlateLiquid: "two compatible saved plans exposed per-plate contributions, merged before one shared 10% overage, and split by container capacity",
+    transfectionExecutionPlan: "Mock, control, and four siRNA preparations followed project/well first appearance before the shared mix; UI, CSV, and XLSX exposed no internal recipe keys",
     xlsxExecutionOrder: "N remained the default; optional Z produced A1, A2, A3 in the exported six-well plate sheet",
     typography: { desktop: typographyScale, mobile: mobileTypography },
     mobilePageWidth: pageWidths,

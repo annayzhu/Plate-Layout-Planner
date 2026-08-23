@@ -96,3 +96,25 @@ test("merges compatible liquid requirements before applying overage once", () =>
   assert.deepEqual(result.groups[0].plates.map((plate) => plate.plateId), ["p1", "p2"]);
   assert.equal(result.groups[1].components[0].preparedVolume, 11);
 });
+
+test("merged liquid preparations preserve physical tube identity and destinations", () => {
+  const result = Workspace.mergeLiquidContributions([
+    { plateId: "p1", plateName: "A549-1", planName: "RNAiMAX", groupName: "siFBN2-1", groupKey: "cargo-si1", groupLabel: "siFBN2-1 · A", tubeRole: "cargo", tube: "A", cargoIdentity: "siFBN2-1", component: "Opti-MEM", baseVolume: 40, perWellVolume: 10, unit: "µL", scopeWellIds: ["A1", "A2"] },
+    { plateId: "p2", plateName: "A549-2", planName: "RNAiMAX", groupName: "siFBN2-1", groupKey: "cargo-si1", groupLabel: "siFBN2-1 · A", tubeRole: "cargo", tube: "A", cargoIdentity: "siFBN2-1", component: "Opti-MEM", baseVolume: 60, perWellVolume: 10, unit: "µL", scopeWellIds: ["B1", "B2", "B3"] },
+  ], { overagePercent: 10 });
+
+  assert.equal(result.groups[0].label, "siFBN2-1 · A");
+  assert.equal(result.groups[0].tubeRole, "cargo");
+  assert.equal(result.groups[0].cargoIdentity, "siFBN2-1");
+  assert.equal(result.groups[0].components[0].baseVolume, 100);
+  assert.equal(result.groups[0].components[0].preparedVolume, 110.00000000000001);
+  assert.deepEqual(result.groups[0].sources.map((source) => [source.plateName, source.scopeWellIds]), [["A549-1", ["A1", "A2"]], ["A549-2", ["B1", "B2", "B3"]]]);
+});
+
+test("merged liquid preparations warn when the per-well transfer is below the pipette limit", () => {
+  const result = Workspace.mergeLiquidContributions([
+    { plateId: "p1", groupKey: "common-b", groupLabel: "RNAiMAX · B", tubeRole: "common", tube: "B", component: "RNAiMAX", baseVolume: 54, perWellVolume: 0.9, unit: "µL" },
+  ], { overagePercent: 10, minPipetteVolume: 1 });
+
+  assert.equal(result.groups[0].components[0].warning, "below-minimum-pipette-volume");
+});

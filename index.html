@@ -6,7 +6,7 @@
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
     <meta name="description" content="纯浏览器本地运行的 6、12、24、96、384 孔板布局、标签与批量计算工具。" />
     <title>Plate Layout Planner · 孔板布局规划工具</title>
-    <link rel="stylesheet" href="styles.css?v=20260823-1" />
+    <link rel="stylesheet" href="styles.css?v=20260823-15" />
   </head>
   <body>
     <header class="topbar">
@@ -52,6 +52,15 @@
           <button id="movePlateRightButton" class="icon-action" type="button" aria-label="孔板右移">→</button>
           <button id="deletePlateButton" class="icon-action danger-action" type="button" aria-label="删除当前孔板">×</button>
           <button id="overviewToggleButton" class="secondary-button compact-button" type="button">全部板概览</button>
+        </div>
+        <div class="workspace-export-actions" aria-label="项目导入与导出">
+          <span class="workspace-export-label">整个项目</span>
+          <button id="exportJsonButton" class="secondary-button compact-button" type="button" data-i18n="backup">备份</button>
+          <button id="exportXlsxButton" class="primary-button compact-button" type="button">XLSX</button>
+          <select id="xlsxOrderSelect" class="compact-export-order" aria-label="XLSX 加样顺序" title="XLSX 加样顺序"><option value="N">N 序</option><option value="Z">Z 序</option></select>
+          <label id="importJsonLabel" class="secondary-button compact-button file-button"><span data-i18n="import">导入项目</span><input id="importJsonInput" type="file" accept=".xlsx,.csv,.tsv,.json,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv,text/tab-separated-values,application/json" hidden /></label>
+          <select id="importModeSelect" class="compact-import-mode" hidden aria-label="导入方式"><option value="add">新增孔板</option><option value="replace">覆盖当前板</option></select>
+          <button id="confirmImportButton" class="secondary-button inline-confirm-button" type="button" hidden>确认导入</button>
         </div>
       </section>
 
@@ -103,13 +112,7 @@
                 <div class="export-actions plate-export-actions" aria-label="导出布局">
                   <button id="exportCsvButton" class="secondary-button" type="button">CSV</button>
                   <button id="exportSvgButton" class="secondary-button" type="button">SVG</button>
-                  <button id="exportJsonButton" class="primary-button" type="button" data-i18n="backup">备份</button>
-                  <button id="exportXlsxButton" class="secondary-button" type="button">XLSX</button>
-                  <select id="xlsxOrderSelect" class="compact-export-order" aria-label="XLSX 加样顺序" title="XLSX 加样顺序"><option value="N">N 序</option><option value="Z">Z 序</option></select>
                   <button id="excelTemplateButton" class="secondary-button" type="button" data-i18n="excelTemplate">Excel 模板</button>
-                  <label id="importJsonLabel" class="secondary-button file-button"><span data-i18n="import">导入表格</span><input id="importJsonInput" type="file" accept=".xlsx,.csv,.tsv,.json,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv,text/tab-separated-values,application/json" hidden /></label>
-                  <select id="importModeSelect" class="compact-import-mode" hidden aria-label="导入方式"><option value="add">新增孔板</option><option value="replace">覆盖当前板</option></select>
-                  <button id="confirmImportButton" class="secondary-button inline-confirm-button" type="button" hidden>确认导入</button>
                   <button id="printButton" class="text-button" type="button" data-i18n="print">打印 / PDF</button>
                 </div>
               </div>
@@ -194,6 +197,10 @@
             </div>
             <button id="openLiquidCalculatorButton" class="primary-button full" type="button">打开配液计算</button>
             <p class="liquid-card-note">默认余量 10% · 最小可靠移液体积 1 µL · 结果仅保存在当前浏览器</p>
+            <section class="saved-liquid-plans" aria-labelledby="savedLiquidPlansTitle">
+              <div class="saved-liquid-plans-heading"><div><h3 id="savedLiquidPlansTitle">当前板已保存方案</h3><p id="savedLiquidPlansHelp">只有保存到项目且状态有效的方案，才会进入跨板汇总和项目导出。</p></div><span id="savedLiquidPlanCount" class="count-badge">0</span></div>
+              <div id="savedLiquidPlanList" class="saved-liquid-plan-list"></div>
+            </section>
             <section class="project-liquid-panel" aria-labelledby="projectLiquidTitle">
               <div class="project-liquid-heading">
                 <div>
@@ -277,9 +284,11 @@
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
     <script src="core.js?v=20260822-8"></script>
-    <script src="liquid-core.js?v=20260820-2"></script>
-    <script src="workspace-core.js?v=20260822-1"></script>
+    <script src="color-core.js?v=20260823-15"></script>
+    <script src="liquid-core.js?v=20260823-15"></script>
+    <script src="liquid-plan-core.js?v=20260823-15"></script>
+    <script src="workspace-core.js?v=20260823-15"></script>
     <script src="xlsx-core.js?v=20260822-1"></script>
-    <script src="app.js?v=20260822-6"></script>
+    <script src="app.js?v=20260823-15"></script>
   </body>
 </html>

@@ -260,6 +260,7 @@
       const tubeName = String(tube.name || `Tube ${perWell.length + 1}`);
       const targetVolumeUL = volumeToUL(tube.volumePerWell, tube.volumeUnit || "µL");
       const tubeRows = [];
+      const cargoDependentTube = (tube.components || []).some((component) => ["cargo", "ratio-per-ug", "ratio-per-mass", "ratio-per-pmol", "ratio-volume"].includes(component.kind));
       for (const component of tube.components || []) {
         if (component.kind === "diluent") continue;
         let componentName = component.name || "Component";
@@ -311,7 +312,8 @@
           volumeUL,
           dilutionAllowed,
           originalVolumeUL,
-          cargoDependent: ["cargo", "ratio-per-ug", "ratio-per-mass", "ratio-per-pmol", "ratio-volume"].includes(component.kind),
+          cargoDependent: cargoDependentTube,
+          tubeRole: cargoDependentTube ? "cargo" : "common",
         });
       }
       const usedVolumeUL = tubeRows.reduce((sum, row) => sum + row.volumeUL, 0);
@@ -319,7 +321,7 @@
       const diluent = (tube.components || []).find((component) => component.kind === "diluent");
       if (targetVolumeUL - usedVolumeUL > 1e-9 && !diluent) throw new Error(`Tube ${tubeName} needs a diluent component.`);
       perWell.push(...tubeRows);
-      if (diluent) perWell.push({ tube: tubeName, component: diluent.name || "Diluent", volumeUL: targetVolumeUL - usedVolumeUL, dilutionAllowed: true, cargoDependent: false });
+      if (diluent) perWell.push({ tube: tubeName, component: diluent.name || "Diluent", volumeUL: targetVolumeUL - usedVolumeUL, dilutionAllowed: true, cargoDependent: cargoDependentTube, tubeRole: cargoDependentTube ? "cargo" : "common" });
     }
     const totalTubeVolume = perWell.reduce((sum, row) => sum + row.volumeUL, 0);
     if (Math.abs(totalTubeVolume - complexVolumeUL) > 1e-6) throw new Error("Premix tube volumes do not add up to the configured complex volume.");

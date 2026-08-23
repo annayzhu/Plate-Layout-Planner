@@ -100,6 +100,23 @@ try {
   const reorderedWellLines = await page.locator('[data-well="A1"] .well-primary, [data-well="A1"] .well-secondary, [data-well="A1"] .well-tertiary').allInnerTexts();
   if (reorderedWellLines.join("|") !== "2|Sample-A|Drug A") throw new Error(`Well display did not follow reordered parameters: ${reorderedWellLines.join("|")}`);
 
+  for (const [wellId, treatment] of [["A1", "NC-FAM"], ["A2", "siFBN2-1"]]) {
+    await page.locator(`[data-well="${wellId}"]`).click();
+    await treatmentRow.locator(".parameter-value").fill(treatment);
+    await page.locator("#applyParametersButton").click();
+  }
+  await page.locator("#colorDimension").selectOption("treatment");
+  const treatmentColors = await page.locator('[data-well="A1"], [data-well="A2"]').evaluateAll((wells) => wells.map((well) => well.style.getPropertyValue("--well-border")));
+  if (!treatmentColors.every(Boolean) || treatmentColors[0] === treatmentColors[1]) {
+    throw new Error(`Distinct treatment categories collided in the plate color registry: ${treatmentColors.join(", ")}`);
+  }
+  const treatmentLegendColors = await page.locator("#plateLegend .legend-swatch").evaluateAll((swatches) => swatches.map((swatch) => swatch.style.getPropertyValue("--swatch")));
+  if (new Set(treatmentLegendColors).size !== treatmentLegendColors.length) throw new Error(`Distinct legend categories reused a color: ${treatmentLegendColors.join(", ")}`);
+  await page.locator('[data-well="A1"]').click();
+  await page.locator('[data-well="A3"]').click({ modifiers: ["Shift"] });
+  await treatmentRow.locator(".parameter-value").fill("Drug A");
+  await page.locator("#applyParametersButton").click();
+
   await page.locator("#clearSelectionButton").click();
   await page.locator('[data-well="A1"]').click();
   await page.locator('[data-well="A4"]').click({ modifiers: ["Shift"] });
@@ -142,6 +159,14 @@ try {
   });
   if (savedLiquidPlans.length !== 1 || savedLiquidPlans[0].module !== "transfection") throw new Error("Transfection recipe was not saved with the project.");
   if (await page.locator("[data-lipo-only]:visible").count()) throw new Error("Lipofectamine-only fields were visible in the RNAiMAX preset.");
+  await page.locator("#closeLiquidDrawerButton").click();
+  if (!(await page.locator("#savedLiquidPlanList").innerText()).includes("已生效")) throw new Error("A saved transfection plan did not appear as current on the plate page.");
+  await page.screenshot({ path: resolve(outputDirectory, "02a-saved-liquid-plan.png"), fullPage: true });
+  await page.locator('[data-liquid-plan-name]').fill("A549 transfection");
+  await page.locator('[data-liquid-plan-name]').blur();
+  if ((await page.locator('[data-liquid-plan-name]').inputValue()) !== "A549 transfection") throw new Error("Saved liquid-plan renaming did not persist in the plate UI.");
+  await page.locator('[data-liquid-plan-action="edit"]').click();
+  if ((await page.locator('#liquidActiveForm [name="cargoName"]').inputValue()) !== "custom-siRNA") throw new Error("Editing a saved plan did not reload its calculation input.");
 
   await page.locator('#liquidModuleTabs [data-liquid-module="basic"]').click();
   await page.locator('#liquidActiveForm [name="calculationType"]').selectOption("dilution");
@@ -649,6 +674,12 @@ try {
   }
   await page.screenshot({ path: resolve(outputDirectory, "05b-mobile-liquid-drawer.png"), fullPage: true });
   await page.locator("#closeLiquidDrawerButton").click();
+  await page.locator('[data-liquid-plan-action="clear"]').click();
+  if (!(await page.locator('[data-liquid-plan-action="clear"]').innerText()).includes("确认")) throw new Error("Clearing a saved plan did not use the inline two-step confirmation.");
+  await page.locator('[data-liquid-plan-action="clear"]').click();
+  if ((await page.locator("#savedLiquidPlanCount").innerText()).trim() !== "0") throw new Error("Confirmed saved-plan clearing did not remove the plan.");
+  await page.locator("#undoButton").click();
+  if ((await page.locator("#savedLiquidPlanCount").innerText()).trim() !== "1") throw new Error("Undo did not restore a cleared saved plan.");
 
   await page.locator('.language-option[data-language="en"]').click();
   if ((await page.locator(".hero h1").innerText()) !== "Free Plate Layout") throw new Error("English UI did not activate.");
@@ -707,7 +738,8 @@ try {
   if (await page.locator(".plate-tab").count() !== 2) throw new Error("Full plate duplication did not create a second physical plate.");
   if (!(await page.locator('[data-well="A1"]').getAttribute("title"))?.includes("Legacy-A")) throw new Error("Full plate duplication did not copy well assignments.");
   await page.locator("#projectName").fill("Legacy copy");
-  await page.locator("#projectName").blur();
+  await page.locator("#projectName").press("Enter");
+  if ((await page.locator(".plate-tab.active span").innerText()).trim() !== "Legacy copy") throw new Error("Pressing Enter did not immediately synchronize the active plate tab name.");
   await page.locator('[data-well="A1"]').click();
   const multiPlateSampleRow = page.locator(".parameter-input-row").filter({ hasText: "样本" });
   await multiPlateSampleRow.locator(".parameter-value").fill("Copy-A");
@@ -715,6 +747,15 @@ try {
   await page.locator(".plate-tab").first().click();
   const originalPlateTitle = await page.locator('[data-well="A1"]').getAttribute("title");
   if (!originalPlateTitle?.includes("Legacy-A") || originalPlateTitle.includes("Copy-A")) throw new Error(`Same-format plates contaminated each other: ${originalPlateTitle}`);
+
+  await page.locator(".plate-tab").nth(1).click();
+  for (const [wellId, value] of [["A2", "Z-A2"], ["B1", "Z-B1"]]) {
+    await page.locator(`[data-well="${wellId}"]`).click();
+    await page.locator(".parameter-input-row").filter({ hasText: "样本" }).locator(".parameter-value").fill(value);
+    await page.locator("#applyParametersButton").click();
+  }
+  if ((await page.locator("#xlsxOrderSelect").inputValue()) !== "N") throw new Error("XLSX execution order did not default to N.");
+  await page.locator("#xlsxOrderSelect").selectOption("Z");
 
   for (const plateIndex of [0, 1]) {
     await page.locator(".plate-tab").nth(plateIndex).click();
@@ -727,19 +768,29 @@ try {
   await page.locator("#projectLiquidScope").selectOption("all");
   await page.locator("#projectLiquidOverage").fill("10");
   await page.locator("#projectLiquidContainerCapacity").fill("25");
+  const sideWidthBeforeSummary = await page.locator(".side-stack").evaluate((element) => element.getBoundingClientRect().width);
   await page.locator("#projectLiquidSummaryButton").click();
   const liquidSummaryText = await page.locator("#projectLiquidSummary").innerText();
   if (!liquidSummaryText.includes("已汇总 2 块板") || !liquidSummaryText.includes("Legacy project") || !liquidSummaryText.includes("Legacy copy")) throw new Error(`Cross-plate liquid summary did not merge the two saved plans: ${liquidSummaryText}`);
-  const containerCounts = await page.locator("#projectLiquidSummary .liquid-table tbody tr td:nth-child(6)").allInnerTexts();
+  const containerCounts = await page.locator("#projectLiquidSummary .liquid-table tbody tr td:nth-child(8)").allInnerTexts();
   if (!containerCounts.some((value) => Number(value) > 1)) throw new Error(`Container-capacity splitting was not exposed in the project summary: ${containerCounts.join(", ")}`);
-
-  for (const [wellId, value] of [["A2", "Z-A2"], ["B1", "Z-B1"]]) {
-    await page.locator(`[data-well="${wellId}"]`).click();
-    await page.locator(".parameter-input-row").filter({ hasText: "样本" }).locator(".parameter-value").fill(value);
-    await page.locator("#applyParametersButton").click();
+  const sideWidthAfterSummary = await page.locator(".side-stack").evaluate((element) => element.getBoundingClientRect().width);
+  if (Math.abs(sideWidthAfterSummary - sideWidthBeforeSummary) > 1) throw new Error(`The execution summary changed the sidebar width: ${sideWidthBeforeSummary}px -> ${sideWidthAfterSummary}px`);
+  if (await page.locator('[data-project-liquid-export="copy"], [data-project-liquid-export="csv"], [data-project-liquid-export="xlsx"]').count() !== 3) {
+    throw new Error("Cross-plate summary does not expose copy, CSV, and XLSX actions together.");
   }
-  if ((await page.locator("#xlsxOrderSelect").inputValue()) !== "N") throw new Error("XLSX execution order did not default to N.");
-  await page.locator("#xlsxOrderSelect").selectOption("Z");
+  const summaryCsvDownloadPromise = page.waitForEvent("download");
+  await page.locator('[data-project-liquid-export="csv"]').click();
+  const summaryCsvDownload = await summaryCsvDownloadPromise;
+  if (!summaryCsvDownload.suggestedFilename().endsWith("_liquid-summary.csv")) throw new Error(`Unexpected summary CSV filename: ${summaryCsvDownload.suggestedFilename()}`);
+  const summaryXlsxDownloadPromise = page.waitForEvent("download");
+  await page.locator('[data-project-liquid-export="xlsx"]').click();
+  const summaryXlsxDownload = await summaryXlsxDownloadPromise;
+  const summaryWorkbook = await XlsxCore.parseWorkbook(await readFile(await summaryXlsxDownload.path()));
+  for (const expectedSheet of ["跨板公共液", "独立目的物管", "逐步加样清单"]) {
+    if (!summaryWorkbook.sheets.some((sheet) => sheet.name === expectedSheet)) throw new Error(`Summary workbook is missing ${expectedSheet}.`);
+  }
+  await page.screenshot({ path: resolve(outputDirectory, "07-cross-plate-liquid-summary.png"), fullPage: true });
 
   await page.locator("#overviewToggleButton").click();
   if (await page.locator(".overview-plate").count() !== 2) throw new Error("Project overview did not show both physical plates.");
@@ -754,9 +805,20 @@ try {
   const xlsxBytes = await readFile(xlsxPath);
   if (xlsxBytes[0] !== 0x50 || xlsxBytes[1] !== 0x4b) throw new Error("Multi-plate export is not a real XLSX ZIP workbook.");
   const parsedWorkbook = await XlsxCore.parseWorkbook(xlsxBytes);
-  const pipettingSheet = parsedWorkbook.sheets.find((sheet) => /逐步加样清单|Pipetting checklist/.test(sheet.name));
-  const copyWellOrder = (pipettingSheet?.rows || []).filter((row) => row[3] === "Legacy copy" && /^[A-Z]+\d+$/.test(String(row[4]))).map((row) => row[4]);
-  if (copyWellOrder.slice(0, 3).join(",") !== "A1,A2,B1") throw new Error(`Z-order XLSX checklist was incorrect: ${copyWellOrder.join(",")}`);
+  const exportedSheetNames = parsedWorkbook.sheets.map((sheet) => sheet.name);
+  for (const expectedSheet of ["实验总览", "Legacy project-配液", "Legacy copy-配液", "跨板公共液", "独立目的物管", "逐步加样清单"]) {
+    if (!parsedWorkbook.sheets.some((sheet) => sheet.name === expectedSheet)) throw new Error(`Execution workbook is missing ${expectedSheet}; exported: ${exportedSheetNames.join(" | ")}.`);
+  }
+  const overviewSheet = parsedWorkbook.sheets.find((sheet) => sheet.name === "实验总览");
+  const overviewPlanNames = (overviewSheet?.rows || []).slice(1).map((row) => String(row[5] || "").trim());
+  if (overviewPlanNames.length !== 2 || overviewPlanNames.some((name) => !name)) throw new Error(`Experiment overview did not preserve the saved liquid-plan names: ${overviewPlanNames.join(" | ")}`);
+  const plateLiquidSheet = parsedWorkbook.sheets.find((sheet) => sheet.name === "Legacy copy-配液");
+  for (const requiredHeader of ["方案名称", "配方", "配液类型", "每孔", "基础需求", "本板方案准备量", "目标孔", "操作步骤"]) {
+    if (!(plateLiquidSheet?.rows?.[0] || []).includes(requiredHeader)) throw new Error(`Per-plate liquid sheet is missing ${requiredHeader}.`);
+  }
+  const copyPlateSheet = parsedWorkbook.sheets.find((sheet) => sheet.name === "Legacy copy");
+  const copyWellOrder = (copyPlateSheet?.rows || []).slice(1).map((row) => row[0]).filter((wellId) => /^[A-Z]+\d+$/.test(String(wellId)));
+  if (copyWellOrder.slice(0, 3).join(",") !== "A1,A2,A3") throw new Error(`Z-order XLSX plate sheet was incorrect: ${copyWellOrder.join(",")}`);
   await page.locator("#importJsonInput").setInputFiles({ name: "roundtrip.xlsx", mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", buffer: xlsxBytes });
   await page.locator("#confirmImportButton").click();
   if (await page.locator(".plate-tab").count() !== 4) throw new Error("XLSX round-trip did not add exactly the two plate worksheets or failed to skip system sheets.");
@@ -832,7 +894,7 @@ try {
     spreadsheetImport: "Excel-compatible CSV created a 12-well plate with units and quoted values",
     multiPlateWorkspace: "same-format plates stayed isolated; overview, duplication, deletion, project undo, persistence, and XLSX round-trip passed",
     crossPlateLiquid: "two compatible saved plans exposed per-plate contributions, merged before one shared 10% overage, and split by container capacity",
-    xlsxExecutionOrder: "N remained the default; optional Z produced A1, A2, B1 in the exported execution checklist",
+    xlsxExecutionOrder: "N remained the default; optional Z produced A1, A2, A3 in the exported six-well plate sheet",
     typography: { desktop: typographyScale, mobile: mobileTypography },
     mobilePageWidth: pageWidths,
     languageSwitch: "Chinese and English persisted across reload",

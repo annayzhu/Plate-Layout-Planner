@@ -73,7 +73,14 @@ export async function createAcceptanceHarness({
     // Leave the running application before injecting state. This lets any queued
     // autosave finish first instead of racing with the deterministic fixture.
     const errorCountBeforeFixturePage = errors.length;
-    await page.goto(new URL(`scripts/acceptance/fixture-host.html?acceptance-fixture=${Date.now()}`, baseUrl).href, { waitUntil: "domcontentloaded" });
+    const fixtureUrl = new URL(`__acceptance_fixture__?run=${Date.now()}`, baseUrl).href;
+    await page.route(fixtureUrl, (route) => route.fulfill({
+      status: 200,
+      contentType: "text/html; charset=utf-8",
+      body: "<!doctype html><meta charset=utf-8><link rel=icon href=data:,><title>Acceptance fixture host</title>",
+    }));
+    await page.goto(fixtureUrl, { waitUntil: "domcontentloaded" });
+    await page.unroute(fixtureUrl);
     // Ignore only errors emitted by the neutral navigation; errors from the
     // application loaded below remain part of the journey result. This fallback
     // also keeps diagnostics deterministic if a hosting adapter omits test files.

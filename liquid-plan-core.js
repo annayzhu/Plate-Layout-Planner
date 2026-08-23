@@ -5,7 +5,7 @@
 })(typeof globalThis !== "undefined" ? globalThis : this, function createLiquidPlanCore() {
   "use strict";
 
-  const EXECUTION_PLAN_VERSION = 1;
+  const EXECUTION_PLAN_VERSION = 2;
 
   const TRANSIENT_INPUT_KEYS = new Set([
     "wellCount", "dilutionWellCount", "groupDimension", "groupRoleLines", "groupOverageLines",
@@ -249,5 +249,58 @@
     return { version: EXECUTION_PLAN_VERSION, preparations, steps };
   }
 
-  return { EXECUTION_PLAN_VERSION, stableRecipeInput, buildTransfectionContributions, buildTransfectionProtocol, buildTransfectionExecutionPlan, safeDisplayLabel };
+  function buildExecutionGroupsFromContributions(contributions = []) {
+    const groups = new Map();
+    for (const item of contributions || []) {
+      if (item?.module !== "transfection" || !["cargo", "common"].includes(item.tubeRole)) continue;
+      const key = String(item.groupKey || `${item.tubeRole}:${item.cargoIdentity || ""}:${item.tube || ""}:${item.compatibilityKey || ""}`);
+      if (!groups.has(key)) groups.set(key, {
+        key,
+        module: "transfection",
+        label: item.groupLabel,
+        tubeRole: item.tubeRole,
+        tube: item.tube,
+        cargoIdentity: item.cargoIdentity || "",
+        compatibilityKey: item.compatibilityKey || "",
+        displayOrder: Number.isFinite(Number(item.displayOrder)) ? Number(item.displayOrder) : Number.MAX_SAFE_INTEGER,
+        components: [],
+        sources: [],
+      });
+      const group = groups.get(key);
+      group.displayOrder = Math.min(group.displayOrder, Number.isFinite(Number(item.displayOrder)) ? Number(item.displayOrder) : Number.MAX_SAFE_INTEGER);
+      const componentName = String(item.component || "Component");
+      let component = group.components.find((entry) => entry.name === componentName);
+      if (!component) {
+        component = { name: componentName, perWellVolume: Number(item.perWellVolume) || 0, baseVolume: 0, preparedVolume: 0, containerCount: 1, warning: false };
+        group.components.push(component);
+      }
+      component.baseVolume += Number(item.baseVolume) || 0;
+      component.preparedVolume += Number(item.savedPreparedVolume ?? item.preparedVolume) || 0;
+      component.containerCount = Math.max(component.containerCount, Number(item.containerCount) || 1);
+      component.warning ||= Boolean(item.warning);
+      group.sources.push({
+        plateId: item.plateId,
+        plateName: item.plateName,
+        planName: item.planName,
+        groupName: item.groupName,
+        scopeWellIds: [...(item.scopeWellIds || [])],
+        displayOrder: item.displayOrder,
+        direction: item.direction,
+        preset: item.preset,
+        protocolMode: item.protocolMode,
+        protocolSteps: [...(item.protocolSteps || [])],
+        finalVolumeUL: item.finalVolumeUL,
+        complexVolumeUL: item.complexVolumeUL,
+        cellMediumVolumeUL: item.cellMediumVolumeUL,
+        incubationMinutes: item.incubationMinutes,
+      });
+    }
+    return [...groups.values()];
+  }
+
+  function buildTransfectionExecutionPlanFromContributions({ contributions = [], language = "zh" } = {}) {
+    return buildTransfectionExecutionPlan({ groups: buildExecutionGroupsFromContributions(contributions), language });
+  }
+
+  return { EXECUTION_PLAN_VERSION, stableRecipeInput, buildTransfectionContributions, buildTransfectionProtocol, buildExecutionGroupsFromContributions, buildTransfectionExecutionPlanFromContributions, buildTransfectionExecutionPlan, safeDisplayLabel };
 });

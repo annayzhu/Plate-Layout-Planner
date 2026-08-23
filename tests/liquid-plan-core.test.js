@@ -179,3 +179,40 @@ test("reverse transfection execution plan adds complexes before cell suspension"
   assert.ok(plan.steps.findIndex((step) => step.phase === "add-complex") < plan.steps.findIndex((step) => step.phase === "add-cells"));
   assert.equal(plan.steps.some((step) => step.phase === "add-medium"), false);
 });
+
+test("single-plate contributions use the same canonical execution order as cross-plate summaries", () => {
+  const input = { preset: "rnai", direction: "forward", finalVolume: "2000", complexVolume: "200", reagentPerWell: "6" };
+  const names = ["Mock", "NC-FAM", "siFBN2-1", "siFBN2-2"];
+  const groups = names.map((name, index) => {
+    const group = transfectionGroup(name, [`A${index + 1}`], name);
+    group.result.finalVolumeUL = 2000;
+    group.result.complexVolumeUL = 200;
+    group.result.cellMediumVolumeUL = 1800;
+    if (name === "Mock") {
+      group.result.cargos = [];
+      group.result.totals = [
+        { tube: "A", tubeRole: "cargo", cargoDependent: true, component: "Opti-MEM", volumeUL: 100, totalVolumeUL: 110 },
+        { tube: "B", tubeRole: "common", component: "RNAiMAX", volumeUL: 6, totalVolumeUL: 6.6 },
+        { tube: "B", tubeRole: "common", component: "Opti-MEM", volumeUL: 94, totalVolumeUL: 103.4 },
+      ];
+    }
+    return group;
+  });
+  const contributions = LiquidPlan.buildTransfectionContributions({
+    input,
+    plate: { id: "p1", name: "A549-1" },
+    planName: "RNAiMAX + siRNA",
+    groups,
+  });
+  const plan = LiquidPlan.buildTransfectionExecutionPlanFromContributions({ contributions, language: "zh" });
+
+  assert.deepEqual(plan.preparations.map((item) => item.label), [
+    "Mock · A", "NC-FAM · A", "siFBN2-1 · A", "siFBN2-2 · A", "RNAiMAX + siRNA · B",
+  ]);
+  assert.deepEqual(plan.steps.slice(0, 5).map((step) => step.phase), [
+    "prepare-cargo", "prepare-cargo", "prepare-cargo", "prepare-cargo", "prepare-common",
+  ]);
+  assert.deepEqual(plan.steps.filter((step) => step.phase === "prepare-cargo").map((step) => step.cargoIdentity), names);
+  assert.ok(plan.steps.findIndex((step) => step.phase === "prepare-common") < plan.steps.findIndex((step) => step.phase === "combine-incubate"));
+  assert.ok(plan.steps.findIndex((step) => step.phase === "add-medium") < plan.steps.findIndex((step) => step.phase === "add-complex"));
+});

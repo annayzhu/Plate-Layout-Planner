@@ -5,6 +5,15 @@ import { resolve } from "node:path";
 const require = createRequire(import.meta.url);
 const XlsxCore = require("../xlsx-core.js");
 
+function assertTextOrder(text, tokens, label) {
+  let cursor = -1;
+  for (const token of tokens) {
+    const next = text.indexOf(token, cursor + 1);
+    if (next < 0) throw new Error(`${label} is missing or misorders “${token}”: ${text.slice(0, 900)}`);
+    cursor = next;
+  }
+}
+
 const playwrightModule = process.env.PLAYWRIGHT_MODULE_URL || "playwright";
 let chromium;
 try {
@@ -21,6 +30,7 @@ const browser = await chromium.launch({
   ...(process.env.CHROMIUM_EXECUTABLE_PATH ? { executablePath: process.env.CHROMIUM_EXECUTABLE_PATH } : {}),
 });
 const page = await browser.newPage({ viewport: { width: 1500, height: 1100 }, deviceScaleFactor: 1 });
+await page.context().grantPermissions(["clipboard-read", "clipboard-write"], { origin: "http://127.0.0.1:4186" });
 const errors = [];
 page.on("pageerror", (error) => errors.push(error.message));
 page.on("console", (message) => {
@@ -156,8 +166,8 @@ try {
   for (const expected of ["8.64 µL", "423.36 µL", "25.92 µL", "406.08 µL"]) {
     if (!liquidResultText.includes(expected)) throw new Error(`Transfection result is missing ${expected}: ${liquidResultText}`);
   }
-  if (!liquidResultText.includes("A 管加入") || !liquidResultText.includes("室温孵育 5 min") || !liquidResultText.includes("每孔向已贴壁细胞加入 270 µL 培养基") || !liquidResultText.includes("每孔向已贴壁细胞加入 30 µL A+B 复合物") || !liquidResultText.includes("24 孔")) {
-    throw new Error(`Transfection checklist is incomplete: ${liquidResultText}`);
+  if (!liquidResultText.includes("准备 custom-siRNA · A") || !liquidResultText.includes("室温孵育 5 min") || !liquidResultText.includes("已贴壁细胞每孔加入 270 µL 培养基") || !liquidResultText.includes("每孔加入 30 µL custom-siRNA 复合物") || !liquidResultText.includes("24 孔")) {
+    throw new Error(`Canonical transfection execution plan is incomplete: ${liquidResultText}`);
   }
   const saveButtonStyle = await page.locator('[data-liquid-action="save"]').evaluate((button) => ({ background: getComputedStyle(button).backgroundColor, color: getComputedStyle(button).color }));
   if (saveButtonStyle.background === "rgba(0, 0, 0, 0)" || saveButtonStyle.color !== "rgb(255, 255, 255)") throw new Error(`Save-to-project is not visually primary: ${JSON.stringify(saveButtonStyle)}`);
@@ -796,6 +806,21 @@ try {
   if ((await checkedPlateControl.isChecked()) === wasChecked) throw new Error("Clicking the checked-plate chip did not toggle its compact checkbox.");
   await page.locator("#projectLiquidPlatePicker label").first().click();
   await page.locator("#projectLiquidPlatePicker").screenshot({ path: resolve(outputDirectory, "07a-checked-plate-picker.png") });
+  await page.locator("#projectLiquidScope").focus();
+  for (let tab = 0; tab < 4; tab += 1) {
+    await page.keyboard.press("Tab");
+    if (await checkedPlateControl.evaluate((input) => document.activeElement === input)) break;
+  }
+  if (!(await checkedPlateControl.evaluate((input) => document.activeElement === input))) throw new Error("Checked-plate control is not keyboard reachable.");
+  const checkedPlateFocus = await checkedPlateControl.evaluate((input) => getComputedStyle(input).boxShadow);
+  if (!checkedPlateFocus || checkedPlateFocus === "none") throw new Error("Checked-plate control has no visible keyboard focus state.");
+  await page.locator('.language-option[data-language="en"]').click();
+  if ((await page.locator("#projectLiquidScope option").nth(1).innerText()) !== "Checked plates") throw new Error("Checked-plate scope was not translated to English.");
+  await page.setViewportSize({ width: 430, height: 900 });
+  const compactPicker = await page.locator("#projectLiquidPlatePicker").evaluate((element) => ({ clientWidth: element.clientWidth, scrollWidth: element.scrollWidth }));
+  if (compactPicker.scrollWidth > compactPicker.clientWidth + 1) throw new Error(`Checked-plate picker overflowed a narrow sidebar: ${JSON.stringify(compactPicker)}`);
+  await page.setViewportSize({ width: 1500, height: 1100 });
+  await page.locator('.language-option[data-language="zh"]').click();
 
   for (const plateIndex of [0, 1]) {
     await page.locator(".plate-tab").nth(plateIndex).click();
@@ -860,11 +885,76 @@ try {
     await page.locator('#liquidActiveForm [name="groupDimension"]').selectOption({ label: "处理" });
     if (plateIndex === 0) await page.locator('#liquidActiveForm [name="groupRoleLines"]').fill("Mock=Mock");
     await page.locator('#liquidActiveForm button[type="submit"]').click();
+    const singlePlatePhases = await page.locator("#liquidResultHost .operator-execution-table tbody tr td:nth-child(2)").allInnerTexts();
+    const expectedSinglePlatePhases = [
+      ...Array(3).fill("准备独立处理液"),
+      "准备公共液",
+      ...Array(3).fill("混合与孵育"),
+      "加入培养基",
+      ...Array(3).fill("加入复合物"),
+    ];
+    if (singlePlatePhases.join("|") !== expectedSinglePlatePhases.join("|")) {
+      throw new Error(`Single-plate transfection order diverged from the canonical plan: ${singlePlatePhases.join(" | ")}`);
+    }
+    if (plateIndex === 0) {
+      const singleTreatmentOrder = await page.locator("#liquidResultHost .operator-preparation-table tbody tr td:nth-child(2)").allInnerTexts();
+      const singleUniqueOrder = singleTreatmentOrder.filter((value, index) => index === 0 || value !== singleTreatmentOrder[index - 1]);
+      if (singleUniqueOrder.slice(0, 4).join("|") !== ["Mock · A", "NC-FAM · A", "siFBN2-1 · A", "RNAiMAX + siRNA · B"].join("|")) {
+        throw new Error(`Single-plate treatment order is incorrect: ${singleUniqueOrder.join(" | ")}`);
+      }
+      await page.locator('[data-liquid-action="copy"]').click();
+      const copiedSinglePlan = await page.evaluate(() => navigator.clipboard.readText());
+      assertTextOrder(copiedSinglePlan, ["Mock · A", "NC-FAM · A", "siFBN2-1 · A", "准备公共液"], "Single-plate clipboard export");
+      const singleCsvPromise = page.waitForEvent("download");
+      await page.locator('[data-liquid-action="csv"]').click();
+      const singleCsv = await readFile(await (await singleCsvPromise).path(), "utf8");
+      assertTextOrder(singleCsv, ["Mock · A", "NC-FAM · A", "siFBN2-1 · A", "准备公共液"], "Single-plate CSV export");
+      await page.evaluate(() => { window.__issue24PrintCalled = false; window.print = () => { window.__issue24PrintCalled = true; }; });
+      await page.locator('[data-liquid-action="print"]').click();
+      if (!(await page.evaluate(() => window.__issue24PrintCalled))) throw new Error("Single-plate Print / PDF did not use the canonical result DOM.");
+    }
     await page.locator('[data-liquid-action="save"]').click();
     await page.locator("#closeLiquidDrawerButton").click();
+    if (plateIndex === 0) {
+      const savedExecution = await page.evaluate(() => {
+        const savedWorkspace = JSON.parse(localStorage.getItem("plate-layout-studio:workspace:v2"));
+        const active = savedWorkspace.plates.find((plate) => plate.id === savedWorkspace.activePlateId);
+        const plan = active.liquidPlans.find((item) => item.module === "transfection");
+        return { version: plan?.executionPlanVersion, phases: plan?.executionPlanSnapshot?.steps?.map((step) => step.phase) || [] };
+      });
+      const expectedSavedPhases = [...Array(3).fill("prepare-cargo"), "prepare-common", ...Array(3).fill("combine-incubate"), "add-medium", ...Array(3).fill("add-complex")];
+      if (savedExecution.version !== 2 || savedExecution.phases.join("|") !== expectedSavedPhases.join("|")) throw new Error(`Saved plan did not preserve the canonical execution snapshot: ${JSON.stringify(savedExecution)}`);
+      await page.locator('[data-saved-liquid-plan]').filter({ hasText: "RNAiMAX + siRNA" }).locator('[data-liquid-plan-action="edit"]').click();
+      await page.locator('#liquidActiveForm button[type="submit"]').click();
+      const reopenedPhases = await page.locator("#liquidResultHost .operator-execution-table tbody tr td:nth-child(2)").allInnerTexts();
+      if (reopenedPhases.join("|") !== expectedSinglePlatePhases.join("|")) throw new Error(`Editing a saved plan changed its execution order: ${reopenedPhases.join(" | ")}`);
+      await page.locator("#closeLiquidDrawerButton").click();
+    }
   }
+  await page.evaluate(async () => {
+    const key = "plate-layout-studio:workspace:v2";
+    const savedWorkspace = JSON.parse(localStorage.getItem(key));
+    const sourcePlan = savedWorkspace.plates[0].liquidPlans.find((plan) => plan.module === "transfection");
+    savedWorkspace.plates[0].liquidPlans.push({ ...sourcePlan, id: "legacy-execution-plan-v1", name: "Legacy transfection v1", executionPlanVersion: 1, executionPlanSnapshot: undefined });
+    savedWorkspace.updatedAt = new Date(Date.now() + 1000).toISOString();
+    localStorage.setItem(key, JSON.stringify(savedWorkspace));
+    await new Promise((resolve, reject) => {
+      const request = indexedDB.open("plate-layout-studio", 1);
+      request.onsuccess = () => {
+        const db = request.result;
+        const transaction = db.transaction("workspaces", "readwrite");
+        transaction.objectStore("workspaces").put(savedWorkspace, "active");
+        transaction.oncomplete = () => { db.close(); resolve(); };
+        transaction.onerror = () => reject(transaction.error);
+      };
+      request.onerror = () => reject(request.error);
+    });
+  });
+  await page.reload({ waitUntil: "networkidle" });
+  await page.locator("#xlsxOrderSelect").selectOption("Z");
   await page.locator("#projectLiquidScope").selectOption("all");
   await page.locator("#projectLiquidSummaryButton").click();
+  if (!(await page.locator("#projectLiquidSummary").innerText()).includes("旧方案")) throw new Error("A legacy execution-plan snapshot entered the current summary without a recalculation warning.");
   await page.locator("[data-open-liquid-summary]").click();
   const transfectionSummaryText = await page.locator("#summaryDrawerContent").innerText();
   if (transfectionSummaryText.includes("transfection:{") || transfectionSummaryText.includes('"cargoLines"')) throw new Error(`Internal recipe keys leaked into the operator summary: ${transfectionSummaryText.slice(0, 500)}`);
@@ -885,6 +975,10 @@ try {
   if (executionPhases.slice(0, expectedPhasePrefix.length).join("|") !== expectedPhasePrefix.join("|")) {
     throw new Error(`Transfection execution dependencies were incorrect: ${executionPhases.join(" | ")}`);
   }
+  await page.locator('#summaryDrawerActions [data-project-liquid-export="copy"]').click();
+  const copiedOperatorSummary = await page.evaluate(() => navigator.clipboard.readText());
+  if (copiedOperatorSummary.includes("transfection:{")) throw new Error(`Cross-plate clipboard export leaked an internal recipe key: ${copiedOperatorSummary.slice(0, 900)}`);
+  assertTextOrder(copiedOperatorSummary, ["Mock · A", "NC-FAM · A", "siFBN2-1 · A", "siFBN2-4 · A", "准备公共液"], "Cross-plate clipboard export");
   const operatorCsvPromise = page.waitForEvent("download");
   await page.locator('[data-project-liquid-export="csv"]').click();
   const operatorCsvDownload = await operatorCsvPromise;
@@ -918,7 +1012,7 @@ try {
   if (xlsxBytes[0] !== 0x50 || xlsxBytes[1] !== 0x4b) throw new Error("Multi-plate export is not a real XLSX ZIP workbook.");
   const parsedWorkbook = await XlsxCore.parseWorkbook(xlsxBytes);
   const exportedSheetNames = parsedWorkbook.sheets.map((sheet) => sheet.name);
-  for (const expectedSheet of ["实验总览", "Legacy project-配液", "Legacy copy-配液", "跨板公共液", "独立处理液", "逐步执行清单"]) {
+  for (const expectedSheet of ["实验总览", "Legacy project-配液", "Legacy copy-配液", "Legacy project-执行", "Legacy copy-执行", "跨板公共液", "独立处理液", "逐步执行清单"]) {
     if (!parsedWorkbook.sheets.some((sheet) => sheet.name === expectedSheet)) throw new Error(`Execution workbook is missing ${expectedSheet}; exported: ${exportedSheetNames.join(" | ")}.`);
   }
   const overviewSheet = parsedWorkbook.sheets.find((sheet) => sheet.name === "实验总览");
@@ -927,6 +1021,13 @@ try {
   const plateLiquidSheet = parsedWorkbook.sheets.find((sheet) => sheet.name === "Legacy copy-配液");
   for (const requiredHeader of ["方案名称", "配方", "配液类型", "每孔", "基础需求", "本板方案准备量", "目标孔", "操作步骤"]) {
     if (!(plateLiquidSheet?.rows?.[0] || []).includes(requiredHeader)) throw new Error(`Per-plate liquid sheet is missing ${requiredHeader}.`);
+  }
+  const plateExecutionSheet = parsedWorkbook.sheets.find((sheet) => sheet.name === "Legacy project-执行");
+  const plateExecutionHeaderIndex = (plateExecutionSheet?.rows || []).findIndex((row) => row[0] === "执行顺序");
+  const plateExecutionPhases = (plateExecutionSheet?.rows || []).slice(plateExecutionHeaderIndex + 1).map((row) => String(row[1] || "")).filter(Boolean);
+  const expectedPerPlatePhasePrefix = [...Array(3).fill("准备独立处理液"), "准备公共液", ...Array(3).fill("混合与孵育"), "加入培养基", ...Array(3).fill("加入复合物")];
+  if (plateExecutionHeaderIndex < 0 || plateExecutionPhases.slice(0, expectedPerPlatePhasePrefix.length).join("|") !== expectedPerPlatePhasePrefix.join("|")) {
+    throw new Error(`Project XLSX per-plate execution sheet diverged from the saved canonical plan: ${plateExecutionPhases.join(" | ")}`);
   }
   const copyPlateSheet = parsedWorkbook.sheets.find((sheet) => sheet.name === "Legacy copy");
   const copyWellOrder = (copyPlateSheet?.rows || []).slice(1).map((row) => row[0]).filter((wellId) => /^[A-Z]+\d+$/.test(String(wellId)));
@@ -1008,7 +1109,8 @@ try {
     spreadsheetImport: "Excel-compatible CSV created a 12-well plate with units and quoted values",
     multiPlateWorkspace: "same-format plates stayed isolated; overview, duplication, deletion, project undo, persistence, and XLSX round-trip passed",
     crossPlateLiquid: "two compatible saved plans exposed per-plate contributions, merged before one shared 10% overage, and split by container capacity",
-    transfectionExecutionPlan: "Mock, control, and four siRNA preparations followed project/well first appearance before the shared mix; UI, CSV, and XLSX exposed no internal recipe keys",
+    transfectionExecutionPlan: "single-plate UI/save/reopen/copy/CSV/print, cross-plate UI/copy/CSV/XLSX, and project XLSX consumed one versioned plan; legacy v1 was blocked",
+    checkedPlateAccessibility: "compact checkbox remained keyboard reachable, visibly focused, translated, and narrow-sidebar safe",
     xlsxExecutionOrder: "N remained the default; optional Z produced A1, A2, A3 in the exported six-well plate sheet",
     typography: { desktop: typographyScale, mobile: mobileTypography },
     mobilePageWidth: pageWidths,

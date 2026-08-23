@@ -1183,11 +1183,13 @@
     const host = document.getElementById("liquidResultHost");
     if (!host) return;
     const header = `<div class="liquid-result-meta">${(result.meta || []).map((item) => `<span>${escapeHtml(item)}</span>`).join("")}</div>`;
-    const table = result.rows?.length
+    const table = result.executionPlan?.preparations?.length
+      ? fullLiquidSummaryTable({ executionPlan: result.executionPlan, overagePercent: liquidOveragePercent(result.input) })
+      : result.rows?.length
       ? `<div class="liquid-table-wrap"><table class="liquid-table"><thead><tr>${result.headers.map((headerText) => `<th>${escapeHtml(headerText)}</th>`).join("")}</tr></thead><tbody>${result.rows.map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`
       : "";
     const warnings = result.warnings?.length ? `<div class="liquid-warning-list">${result.warnings.map((warning) => `<div class="liquid-warning">${escapeHtml(warning)}</div>`).join("")}</div>` : "";
-    const checklist = result.checklist?.length ? `<ol class="liquid-checklist">${result.checklist.map((step) => `<li>${escapeHtml(step)}</li>`).join("")}</ol>` : "";
+    const checklist = result.checklist?.length ? `<section class="liquid-custom-protocol"><h3>${bilingual("自定义操作备注", "Custom protocol notes")}</h3><ol class="liquid-checklist">${result.checklist.map((step) => `<li>${escapeHtml(step)}</li>`).join("")}</ol></section>` : "";
     const layout = result.layout?.length ? liquidLayoutPreview(result.layout) : "";
     const applyAction = result.applyAction || "apply-layout";
     const applyLabel = result.applyLabel || bilingual("确认写入孔板", "Confirm plate write");
@@ -1198,11 +1200,6 @@
     return Number(input.overagePercent ?? input.fixedOveragePercent ?? input.dilutionOveragePercent ?? input.solidOveragePercent ?? 0) || 0;
   }
 
-  function stableRecipeInput(input = {}) {
-    const omitted = new Set(["wellCount", "dilutionWellCount", "overagePercent", "fixedOveragePercent", "dilutionOveragePercent", "solidOveragePercent"]);
-    return Object.fromEntries(Object.keys(input).filter((key) => !omitted.has(key)).sort().map((key) => [key, input[key]]));
-  }
-
   function volumeFromCell(value) {
     const match = String(value ?? "").match(/(-?\d+(?:\.\d+)?(?:e[+-]?\d+)?)\s*(nL|uL|µL|mL|L)\b/i);
     if (!match) return null;
@@ -1211,6 +1208,7 @@
   }
 
   function liquidResultContributions(result, plate) {
+    if (Array.isArray(result?.contributions)) return result.contributions.map((item) => ({ ...item, scopeWellIds: [...(item.scopeWellIds || [])] }));
     const input = result?.input || {};
     if (result?.module === "transfection" && Array.isArray(result.executionGroups)) {
       return LiquidPlan.buildTransfectionContributions({
@@ -1221,7 +1219,7 @@
       });
     }
     const multiplier = 1 + liquidOveragePercent(input) / 100;
-    const groupKey = `${result.module}:${JSON.stringify(stableRecipeInput(input))}`;
+    const groupKey = `${result.module}:${JSON.stringify(LiquidPlan.stableRecipeInput(input))}`;
     const moduleLabel = result.recipeName || ({
       basic: bilingual("基础常规配液", "Routine preparation"),
       serial: bilingual("连续梯度稀释", "Serial dilution"),
@@ -1637,16 +1635,18 @@
     }
     if (values.optimizationEnabled === "on") warnings.push(bilingual(`优化梯度已开启：已生成 ${variants.length} 个独立变体，不自动合并 Master Mix。`, `Optimization is enabled: ${variants.length} independent variants were generated and were not merged.`));
     const customChecklist = values.protocolMode === "custom" ? String(values.protocolSteps || "").split(/\r?\n/).map((step) => step.trim()).filter(Boolean) : [];
-    const generatedProtocols = groupResults.map(({ group, result }) => LiquidPlan.buildTransfectionProtocol({ language, preset: values.preset, direction: values.direction, groupName: groupResults.length > 1 ? group.name : "", result }));
-    const checklist = customChecklist.length ? customChecklist : [...new Set(generatedProtocols.flat())];
     const recipeName = values.preset === "rnai" ? "RNAiMAX + siRNA" : values.preset === "lipo3000" ? "Lipofectamine 3000 + plasmid" : bilingual("自定义转染体系", "Custom transfection system");
-    const executionGroups = groupResults.map(({ group, role, result }, index) => ({ ...group, role, result, protocolSteps: customChecklist.length ? customChecklist : generatedProtocols[index] }));
+    const executionGroups = groupResults.map(({ group, role, result }) => ({ ...group, role, result, protocolSteps: customChecklist }));
+    const contributions = LiquidPlan.buildTransfectionContributions({ input: values, plate: project, planName: recipeName, groups: executionGroups });
+    const executionPlan = LiquidPlan.buildTransfectionExecutionPlanFromContributions({ contributions, language });
     renderLiquidResult({
       module: "transfection", input: values, meta,
       headers: [bilingual("组", "Group"), bilingual("管", "Tube"), bilingual("组分", "Component"), bilingual("每孔", "Per well"), bilingual("Master Mix", "Master mix")], rows, warnings,
-      checklist,
+      checklist: customChecklist,
       calculation: groupResults[0]?.result,
       executionGroups,
+      contributions,
+      executionPlan,
       recipeName,
     });
   }
@@ -1773,7 +1773,12 @@
   }
 
   function liquidTableText(result, delimiter = "\t") {
-    return [result.headers, ...(result.rows || [])].map((row) => row.map((cell) => String(cell ?? "")).join(delimiter)).join("\n");
+    return liquidRowsForResult(result).map((row) => row.map((cell) => String(cell ?? "")).join(delimiter)).join("\n");
+  }
+
+  function liquidRowsForResult(result) {
+    if (result?.executionPlan?.preparations?.length) return operatorSummaryRows({ executionPlan: result.executionPlan, overagePercent: liquidOveragePercent(result.input) });
+    return [result.headers, ...(result.rows || [])];
   }
 
   function updateSelectionVisuals(refreshEditor = true) {
@@ -2939,7 +2944,7 @@
       return;
     }
     if (action === "csv") {
-      const csv = `\uFEFF${[lastLiquidResult.headers, ...(lastLiquidResult.rows || [])].map((row) => row.map(Core.csvEscape).join(",")).join("\r\n")}`;
+      const csv = `\uFEFF${liquidRowsForResult(lastLiquidResult).map((row) => row.map(Core.csvEscape).join(",")).join("\r\n")}`;
       downloadBlob(csv, "text/csv;charset=utf-8", `${Core.safeFileName(project.name)}_${activeLiquidModule}_liquid-preparation.csv`);
       return;
     }
@@ -2963,6 +2968,7 @@
       scopeWellIds: liquidTargetWellIds(),
       input: savedInput,
       resultSnapshot: { headers: lastLiquidResult.headers, rows: lastLiquidResult.rows, warnings: lastLiquidResult.warnings || [], checklist: lastLiquidResult.checklist || [], executionGroups: lastLiquidResult.executionGroups || [] },
+      executionPlanSnapshot: lastLiquidResult.executionPlan ? JSON.parse(JSON.stringify(lastLiquidResult.executionPlan)) : undefined,
       protocolSnapshot: { steps: lastLiquidResult.checklist || [] },
       contributions: liquidResultContributions(lastLiquidResult, project),
       createdAt: existingPlan?.createdAt || now,
@@ -3185,10 +3191,22 @@
         contribution.savedPreparedVolume !== undefined ? `${liquidNumber(contribution.savedPreparedVolume)} µL` : "",
         contribution.planOveragePercent !== undefined ? `${contribution.planOveragePercent}%` : "",
         (contribution.scopeWellIds || plan.scopeWellIds || []).join(", "),
-        (plan.protocolSnapshot?.steps || contribution.protocolSteps || []).join(" → "),
+        "",
       ]);
       if (preparationRows.length === 1) preparationRows.push([bilingual("尚未保存配液方案", "No saved liquid plan"), "", "", "", "", "", "", "", "", "", "", "", ""]);
       sheets.push({ name: `${plate.name}-${bilingual("配液", "liquid")}`, systemKind: "plate-liquid", rows: preparationRows, freezeRows: 1, autoFilter: true });
+      const executionRows = [];
+      for (const plan of plate.liquidPlans || []) {
+        if (plan.module !== "transfection") continue;
+        executionRows.push([bilingual("方案", "Plan"), plan.name || plan.recipeName || plan.module]);
+        if (plan.executionPlanVersion === LiquidPlan.EXECUTION_PLAN_VERSION && plan.executionPlanSnapshot?.preparations?.length) {
+          executionRows.push(...operatorSummaryRows({ executionPlan: plan.executionPlanSnapshot, overagePercent: liquidOveragePercent(plan.input) }));
+        } else {
+          executionRows.push([bilingual("旧版本方案，请重新打开、计算并保存后再执行。", "Legacy plan: reopen, recalculate, and save before execution.")]);
+        }
+        executionRows.push([]);
+      }
+      if (executionRows.length) sheets.push({ name: `${plate.name}-${bilingual("执行", "steps")}`, systemKind: "plate-liquid-execution", rows: executionRows, freezeRows: 0, autoFilter: false });
     }
     const liquidSummary = workspace.latestLiquidSummary;
     if (liquidSummary?.executionPlan?.preparations?.length) sheets.push(...liquidSummaryWorkbookSheets(liquidSummary));

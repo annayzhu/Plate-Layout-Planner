@@ -781,6 +781,22 @@ try {
   if ((await page.locator("#xlsxOrderSelect").inputValue()) !== "N") throw new Error("XLSX execution order did not default to N.");
   await page.locator("#xlsxOrderSelect").selectOption("Z");
 
+  await page.locator("#projectLiquidScope").selectOption("checked");
+  const checkedPlateControl = page.locator("#projectLiquidPlatePicker input").first();
+  const checkedPlateMetrics = await checkedPlateControl.evaluate((input) => {
+    const style = getComputedStyle(input);
+    const box = input.getBoundingClientRect();
+    return { width: box.width, height: box.height, appearance: style.appearance };
+  });
+  if (checkedPlateMetrics.width > 18 || checkedPlateMetrics.height > 18 || checkedPlateMetrics.appearance !== "none") {
+    throw new Error(`Checked-plate control is not compact and browser-independent: ${JSON.stringify(checkedPlateMetrics)}`);
+  }
+  const wasChecked = await checkedPlateControl.isChecked();
+  await page.locator("#projectLiquidPlatePicker label").first().click();
+  if ((await checkedPlateControl.isChecked()) === wasChecked) throw new Error("Clicking the checked-plate chip did not toggle its compact checkbox.");
+  await page.locator("#projectLiquidPlatePicker label").first().click();
+  await page.locator("#projectLiquidPlatePicker").screenshot({ path: resolve(outputDirectory, "07a-checked-plate-picker.png") });
+
   for (const plateIndex of [0, 1]) {
     await page.locator(".plate-tab").nth(plateIndex).click();
     await page.locator('.liquid-module-launch[data-liquid-module="basic"]').click();

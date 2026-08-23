@@ -62,9 +62,20 @@ npm run serve
 
 ```bash
 npm test
+npm run test:visual
 ```
 
 测试覆盖孔位生成、Shift 连选、矩形选择、无碰撞参数着色、固定比例与基础配液、多目的物/多管转染体系、目的物管隔离、中间工作液确认、向后累计的连续梯度、药物加药液与溶剂计算、独立多板数据模型、旧数据迁移、按目的物身份的跨板配液合并、真实执行型 XLSX 往返和配方库闭环。
+
+真实浏览器验收使用 `scripts/acceptance/` 下的共享 harness。默认命令运行完整历史基线和所有隔离旅程；维护者也可以只运行某一条旅程：
+
+```bash
+ACCEPTANCE_JOURNEYS=plate-layout npm run test:visual:journey
+ACCEPTANCE_JOURNEYS=liquid-plan-lifecycle npm run test:visual:journey
+ACCEPTANCE_JOURNEYS=issue-28-merge,issue-28-split npm run test:visual:journey
+```
+
+每条隔离旅程都会清空浏览器存储、使用确定性 fixture，并在失败时生成包含旅程名称的错误及专属截图。`ACCEPTANCE_BASE_URL` 可切换到本地 Site 构建或全新解压的离线目录，而无需复制验收逻辑。模块边界和覆盖迁移见 `docs/agents/acceptance-architecture.md`。
 
 ## 科研使用边界
 

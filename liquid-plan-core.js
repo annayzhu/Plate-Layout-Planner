@@ -73,5 +73,47 @@
     return contributions;
   }
 
-  return { stableRecipeInput, buildTransfectionContributions };
+  function protocolNumber(value) {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return "";
+    return String(Math.round((number + Number.EPSILON) * 10000) / 10000);
+  }
+
+  function buildTransfectionProtocol({ language = "zh", preset = "rnai", direction = "forward", groupName = "", result } = {}) {
+    if (!result || !Array.isArray(result.perWell)) return [];
+    const isEnglish = language === "en";
+    const tubeRows = (tube) => result.perWell.filter((row) => String(row.tube) === tube && Number.isFinite(Number(row.volumeUL)));
+    const tubeText = (tube) => tubeRows(tube).map((row) => `${row.component} ${protocolNumber(row.volumeUL)} µL`).join(isEnglish ? " + " : " ＋ ");
+    const prefix = groupName ? `${groupName}：` : "";
+    const finalVolume = Number(result.finalVolumeUL);
+    const complexVolume = Number(result.complexVolumeUL);
+    const cellVolume = Number.isFinite(Number(result.cellMediumVolumeUL)) ? Number(result.cellMediumVolumeUL) : finalVolume - complexVolume;
+    if (preset === "rnai") {
+      const steps = [
+        isEnglish ? `${groupName ? `${groupName}: ` : ""}For each well, prepare tube A with ${tubeText("A")}.` : `${prefix}每孔 A 管加入 ${tubeText("A")}。`,
+        isEnglish ? `For each well, prepare tube B with ${tubeText("B")}.` : `每孔 B 管加入 ${tubeText("B")}。`,
+        isEnglish ? "Combine tubes A and B and incubate for 5 min at room temperature." : "混合 A、B 管，室温孵育 5 min。",
+      ];
+      if (direction === "forward") {
+        steps.push(
+          isEnglish ? `Add ${protocolNumber(cellVolume)} µL culture medium to the attached cells in each well.` : `每孔向已贴壁细胞加入 ${protocolNumber(cellVolume)} µL 培养基。`,
+          isEnglish ? `Add ${protocolNumber(complexVolume)} µL of the A+B complex to the attached cells in each well.` : `每孔向已贴壁细胞加入 ${protocolNumber(complexVolume)} µL A+B 复合物。`,
+        );
+      } else {
+        steps.push(
+          isEnglish ? `Add ${protocolNumber(complexVolume)} µL of the A+B complex to each well first.` : `每孔先加入 ${protocolNumber(complexVolume)} µL A+B 复合物。`,
+          isEnglish ? `Then add ${protocolNumber(cellVolume)} µL cell suspension to each well.` : `随后每孔加入 ${protocolNumber(cellVolume)} µL 细胞悬液。`,
+        );
+      }
+      return steps;
+    }
+    const tubeNames = [...new Set(result.perWell.map((row) => String(row.tube || "Tube")))];
+    const steps = tubeNames.map((tube) => isEnglish ? `For each well, prepare tube ${tube} with ${tubeText(tube)}.` : `每孔 ${tube} 管加入 ${tubeText(tube)}。`);
+    steps.push(isEnglish ? "Combine the premix tubes and incubate according to the reagent instructions." : "混合各预混管，并按所用试剂说明书完成孵育。");
+    if (direction === "forward") steps.push(isEnglish ? `Add ${protocolNumber(complexVolume)} µL complex to attached cells in each well.` : `正向转染：每孔向已贴壁细胞加入 ${protocolNumber(complexVolume)} µL 复合物。`);
+    else steps.push(isEnglish ? `Add ${protocolNumber(complexVolume)} µL complex first, then ${protocolNumber(cellVolume)} µL cell suspension per well.` : `反向转染：每孔先加入 ${protocolNumber(complexVolume)} µL 复合物，再加入 ${protocolNumber(cellVolume)} µL 细胞悬液。`);
+    return steps;
+  }
+
+  return { stableRecipeInput, buildTransfectionContributions, buildTransfectionProtocol };
 });

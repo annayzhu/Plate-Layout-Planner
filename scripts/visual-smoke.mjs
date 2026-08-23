@@ -125,6 +125,13 @@ try {
   await page.locator('.liquid-module-launch[data-liquid-module="transfection"]').click();
   if (await page.locator("#liquidDrawer").isHidden()) throw new Error("Liquid preparation drawer did not open.");
   let transfectionForm = page.locator("#liquidActiveForm");
+  if ((await transfectionForm.locator('[name="direction"]').inputValue()) !== "forward") throw new Error("New RNAiMAX calculations do not default to forward transfection.");
+  await transfectionForm.locator('[name="direction"]').selectOption("reverse");
+  const reverseProtocol = await transfectionForm.locator('[name="protocolSteps"]').inputValue();
+  if (!reverseProtocol.includes("先加入 30 µL A+B 复合物") || !reverseProtocol.includes("随后每孔加入 270 µL 细胞悬液") || reverseProtocol.includes("已贴壁细胞")) {
+    throw new Error(`Reverse-transfection protocol did not switch to the correct execution order: ${reverseProtocol}`);
+  }
+  await transfectionForm.locator('[name="direction"]').selectOption("forward");
   const initialWellCount = transfectionForm.locator('[name="wellCount"]');
   if ((await initialWellCount.inputValue()) !== "4" || await initialWellCount.isEditable()) {
     throw new Error("The plate-linked well count was not rendered as a read-only four-well scope.");
@@ -139,17 +146,21 @@ try {
   await page.locator('.liquid-module-launch[data-liquid-module="transfection"]').click();
   transfectionForm = page.locator("#liquidActiveForm");
   if ((await transfectionForm.locator('[name="wellCount"]').inputValue()) !== "24") throw new Error("Reopening after selecting the full plate did not refresh the well count to 24.");
-  if ((await transfectionForm.locator('[name="cargoName"]').inputValue()) !== "custom-siRNA" || (await transfectionForm.locator('[name="overagePercent"]').inputValue()) !== "20") {
-    throw new Error("Transfection inputs were not preserved while the plate scope changed.");
+  const reopenedCargo = await transfectionForm.locator('[name="cargoName"]').inputValue();
+  const reopenedOverage = await transfectionForm.locator('[name="overagePercent"]').inputValue();
+  if (reopenedCargo !== "custom-siRNA" || reopenedOverage !== "20") {
+    throw new Error(`Transfection inputs were not preserved while the plate scope changed: cargo=${reopenedCargo}, overage=${reopenedOverage}.`);
   }
   await transfectionForm.locator('button[type="submit"]').click();
   const liquidResultText = await page.locator("#liquidResultHost").innerText();
   for (const expected of ["8.64 µL", "423.36 µL", "25.92 µL", "406.08 µL"]) {
     if (!liquidResultText.includes(expected)) throw new Error(`Transfection result is missing ${expected}: ${liquidResultText}`);
   }
-  if (!liquidResultText.includes("A 管加入 siRNA") || !liquidResultText.includes("室温孵育 5 min") || !liquidResultText.includes("24 孔")) {
+  if (!liquidResultText.includes("A 管加入") || !liquidResultText.includes("室温孵育 5 min") || !liquidResultText.includes("每孔向已贴壁细胞加入 270 µL 培养基") || !liquidResultText.includes("每孔向已贴壁细胞加入 30 µL A+B 复合物") || !liquidResultText.includes("24 孔")) {
     throw new Error(`Transfection checklist is incomplete: ${liquidResultText}`);
   }
+  const saveButtonStyle = await page.locator('[data-liquid-action="save"]').evaluate((button) => ({ background: getComputedStyle(button).backgroundColor, color: getComputedStyle(button).color }));
+  if (saveButtonStyle.background === "rgba(0, 0, 0, 0)" || saveButtonStyle.color !== "rgb(255, 255, 255)") throw new Error(`Save-to-project is not visually primary: ${JSON.stringify(saveButtonStyle)}`);
   if (await page.locator('[data-liquid-action="print"]').count() !== 1) throw new Error("Liquid results do not expose a Print / PDF action.");
   await page.screenshot({ path: resolve(outputDirectory, "02-liquid-transfection.png"), fullPage: true });
   await page.locator('[data-liquid-action="save"]').click();
@@ -597,11 +608,18 @@ try {
   const svgDownload = await svgDownloadPromise;
   if (!svgDownload.suggestedFilename().endsWith("24well.svg")) throw new Error("SVG export filename was unexpected.");
 
+  await page.locator("#openProjectImportButton").click();
+  const projectTemplateDownloadPromise = page.waitForEvent("download");
+  await page.locator("#projectTemplateButton").click();
+  const projectTemplateDownload = await projectTemplateDownloadPromise;
+  if (!projectTemplateDownload.suggestedFilename().endsWith("_import-template.xlsx")) throw new Error(`Project template filename was unexpected: ${projectTemplateDownload.suggestedFilename()}`);
+  const projectTemplateWorkbook = await XlsxCore.parseWorkbook(await readFile(await projectTemplateDownload.path()));
+  if (!projectTemplateWorkbook.sheets.some((sheet) => sheet.name === "使用说明") || !projectTemplateWorkbook.sheets.some((sheet) => sheet.rows?.[0]?.[0] === "孔位")) throw new Error("Project XLSX template is missing instructions or a plate worksheet.");
   const templateDownloadPromise = page.waitForEvent("download");
   await page.locator("#excelTemplateButton").click();
   const templateDownload = await templateDownloadPromise;
-  if (templateDownload.suggestedFilename() !== "未命名孔板_24well_Excel模板.csv") {
-    throw new Error(`Excel template filename was unexpected: ${templateDownload.suggestedFilename()}`);
+  if (templateDownload.suggestedFilename() !== "未命名孔板_24well_CSV模板.csv") {
+    throw new Error(`CSV template filename was unexpected: ${templateDownload.suggestedFilename()}`);
   }
   const templatePath = await templateDownload.path();
   const templateCsv = await readFile(templatePath, "utf8");
@@ -609,6 +627,7 @@ try {
   if (!templateCsv.startsWith(expectedTemplateStart) || !templateCsv.includes("\r\nD6,,,,,,")) {
     throw new Error(`Excel template content was unexpected: ${templateCsv.slice(0, 180)}`);
   }
+  await page.locator("#closeProjectFileDialogButton").click();
 
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.locator('.language-option[data-language="en"]').click();
@@ -695,10 +714,12 @@ try {
     "A2,S002,Drug B,2.5,48,\"含,逗号\"",
     "C4,S012,Control,0,24,",
   ].join("\r\n");
-  if ((await page.locator("#importJsonLabel").innerText()).trim() !== "导入表格") {
-    throw new Error(`Spreadsheet import is not clearly labeled: ${await page.locator("#importJsonLabel").innerText()}`);
-  }
+  if ((await page.locator("#exportXlsxButton").innerText()).trim() !== "导出项目 XLSX") throw new Error("Project XLSX export is not explicitly scoped.");
+  await page.locator("#openProjectImportButton").click();
+  if (!(await page.locator("#projectFileDialogHelp").innerText()).includes("XLSX")) throw new Error("Spreadsheet import panel does not explain multi-plate XLSX.");
   await page.locator("#importJsonInput").setInputFiles({ name: "实验板_12well.csv", mimeType: "text/csv", buffer: Buffer.from(importCsv) });
+  await page.waitForFunction(() => document.querySelector("#importPreview")?.textContent?.includes("实验板"));
+  if (!(await page.locator("#importPreview").innerText()).includes("实验板")) throw new Error("Spreadsheet import preview did not expose the incoming plate.");
   await page.locator("#confirmImportButton").click();
   if (await page.locator(".well").count() !== 12) throw new Error("CSV import did not switch to the inferred 12-well plate.");
   if ((await page.locator("#projectName").inputValue()) !== "实验板") throw new Error("CSV filename did not become the imported plate name.");
@@ -719,12 +740,15 @@ try {
     calculationLog: [],
     calculationOutputs: [],
   };
-  await page.locator("#importJsonInput").setInputFiles({
+  await page.locator("#openBackupRestoreButton").click();
+  await page.locator("#restoreJsonInput").setInputFiles({
     name: "legacy-project.json",
     mimeType: "application/json",
     buffer: Buffer.from(JSON.stringify(legacyProject)),
   });
-  await page.locator("#confirmImportButton").click();
+  await page.waitForFunction(() => document.querySelector("#restorePreview")?.textContent?.includes("Legacy project"));
+  if (!(await page.locator("#restorePreview").innerText()).includes("Legacy project")) throw new Error("Backup restore preview did not expose the incoming workspace.");
+  await page.locator("#confirmRestoreButton").click();
   if (await page.locator(".well").count() !== 6) throw new Error("Legacy JSON import did not restore the six-well plate.");
   const legacyA1Title = await page.locator('[data-well="A1"]').getAttribute("title");
   if (!legacyA1Title?.includes("Legacy-A")) throw new Error(`Legacy JSON import lost A1 data: ${legacyA1Title}`);
@@ -771,12 +795,18 @@ try {
   const sideWidthBeforeSummary = await page.locator(".side-stack").evaluate((element) => element.getBoundingClientRect().width);
   await page.locator("#projectLiquidSummaryButton").click();
   const liquidSummaryText = await page.locator("#projectLiquidSummary").innerText();
-  if (!liquidSummaryText.includes("已汇总 2 块板") || !liquidSummaryText.includes("Legacy project") || !liquidSummaryText.includes("Legacy copy")) throw new Error(`Cross-plate liquid summary did not merge the two saved plans: ${liquidSummaryText}`);
-  const containerCounts = await page.locator("#projectLiquidSummary .liquid-table tbody tr td:nth-child(8)").allInnerTexts();
+  if (!liquidSummaryText.includes("已汇总 2 块板")) throw new Error(`Cross-plate liquid summary did not include both saved plans: ${liquidSummaryText}`);
+  if (await page.locator("#projectLiquidSummary .liquid-table").count()) throw new Error("The narrow sidebar still renders the full summary table.");
+  await page.locator("[data-open-liquid-summary]").click();
+  const fullSummaryText = await page.locator("#summaryDrawerContent").innerText();
+  if (!fullSummaryText.includes("Legacy project") || !fullSummaryText.includes("Legacy copy")) throw new Error(`The full summary lost source-plate provenance: ${fullSummaryText}`);
+  const containerCounts = await page.locator("#summaryDrawerContent .liquid-table tbody tr td:nth-child(8)").allInnerTexts();
   if (!containerCounts.some((value) => Number(value) > 1)) throw new Error(`Container-capacity splitting was not exposed in the project summary: ${containerCounts.join(", ")}`);
   const sideWidthAfterSummary = await page.locator(".side-stack").evaluate((element) => element.getBoundingClientRect().width);
   if (Math.abs(sideWidthAfterSummary - sideWidthBeforeSummary) > 1) throw new Error(`The execution summary changed the sidebar width: ${sideWidthBeforeSummary}px -> ${sideWidthAfterSummary}px`);
-  if (await page.locator('[data-project-liquid-export="copy"], [data-project-liquid-export="csv"], [data-project-liquid-export="xlsx"]').count() !== 3) {
+  const summaryScroll = await page.locator("#summaryDrawerContent .project-liquid-table-wrap").evaluate((element) => ({ client: element.clientWidth, scroll: element.scrollWidth }));
+  if (summaryScroll.scroll <= summaryScroll.client) throw new Error(`Full summary does not expose an internal horizontal scroll region: ${JSON.stringify(summaryScroll)}`);
+  if (await page.locator('#summaryDrawerActions [data-project-liquid-export="copy"], #summaryDrawerActions [data-project-liquid-export="csv"], #summaryDrawerActions [data-project-liquid-export="xlsx"]').count() !== 3) {
     throw new Error("Cross-plate summary does not expose copy, CSV, and XLSX actions together.");
   }
   const summaryCsvDownloadPromise = page.waitForEvent("download");
@@ -791,6 +821,7 @@ try {
     if (!summaryWorkbook.sheets.some((sheet) => sheet.name === expectedSheet)) throw new Error(`Summary workbook is missing ${expectedSheet}.`);
   }
   await page.screenshot({ path: resolve(outputDirectory, "07-cross-plate-liquid-summary.png"), fullPage: true });
+  await page.locator("#closeSummaryDrawerButton").click();
 
   await page.locator("#overviewToggleButton").click();
   if (await page.locator(".overview-plate").count() !== 2) throw new Error("Project overview did not show both physical plates.");
@@ -819,7 +850,9 @@ try {
   const copyPlateSheet = parsedWorkbook.sheets.find((sheet) => sheet.name === "Legacy copy");
   const copyWellOrder = (copyPlateSheet?.rows || []).slice(1).map((row) => row[0]).filter((wellId) => /^[A-Z]+\d+$/.test(String(wellId)));
   if (copyWellOrder.slice(0, 3).join(",") !== "A1,A2,A3") throw new Error(`Z-order XLSX plate sheet was incorrect: ${copyWellOrder.join(",")}`);
+  await page.locator("#openProjectImportButton").click();
   await page.locator("#importJsonInput").setInputFiles({ name: "roundtrip.xlsx", mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", buffer: xlsxBytes });
+  await page.waitForFunction(() => !document.querySelector("#confirmImportButton")?.hidden);
   await page.locator("#confirmImportButton").click();
   if (await page.locator(".plate-tab").count() !== 4) throw new Error("XLSX round-trip did not add exactly the two plate worksheets or failed to skip system sheets.");
   await page.reload({ waitUntil: "networkidle" });

@@ -44,3 +44,40 @@ test("cargo-free compatible tube shares a key across different siRNAs", () => {
 
   assert.equal(first.find((item) => item.tubeRole === "common").groupKey, second.find((item) => item.tubeRole === "common").groupKey);
 });
+
+test("RNAiMAX protocol distinguishes forward and reverse execution with per-well volumes", () => {
+  const result = {
+    finalVolumeUL: 2000,
+    complexVolumeUL: 200,
+    cellMediumVolumeUL: 1800,
+    perWell: [
+      { tube: "A", component: "siRNA", volumeUL: 2 },
+      { tube: "A", component: "Opti-MEM", volumeUL: 98 },
+      { tube: "B", component: "RNAiMAX", volumeUL: 6 },
+      { tube: "B", component: "Opti-MEM", volumeUL: 94 },
+    ],
+  };
+  const forward = LiquidPlan.buildTransfectionProtocol({ preset: "rnai", direction: "forward", result });
+  assert.deepEqual(forward, [
+    "每孔 A 管加入 siRNA 2 µL ＋ Opti-MEM 98 µL。",
+    "每孔 B 管加入 RNAiMAX 6 µL ＋ Opti-MEM 94 µL。",
+    "混合 A、B 管，室温孵育 5 min。",
+    "每孔向已贴壁细胞加入 1800 µL 培养基。",
+    "每孔向已贴壁细胞加入 200 µL A+B 复合物。",
+  ]);
+  const reverse = LiquidPlan.buildTransfectionProtocol({ preset: "rnai", direction: "reverse", result });
+  assert.match(reverse[3], /先加入 200 µL A\+B 复合物/);
+  assert.match(reverse[4], /随后每孔加入 1800 µL 细胞悬液/);
+  assert.doesNotMatch(reverse.join(" "), /已贴壁细胞加入 1800/);
+});
+
+test("non-RNAi protocol does not inherit the RNAiMAX five-minute incubation", () => {
+  const steps = LiquidPlan.buildTransfectionProtocol({
+    language: "en",
+    preset: "custom-two",
+    direction: "forward",
+    result: { finalVolumeUL: 300, complexVolumeUL: 30, cellMediumVolumeUL: 270, perWell: [{ tube: "A", component: "Cargo", volumeUL: 2 }, { tube: "A", component: "Medium", volumeUL: 28 }] },
+  });
+  assert.match(steps.join(" "), /according to the reagent instructions/);
+  assert.doesNotMatch(steps.join(" "), /5 min/);
+});

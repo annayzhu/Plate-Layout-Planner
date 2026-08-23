@@ -519,10 +519,46 @@ label > span { display: block; margin-bottom: 5px; color: var(--muted); font-siz
 .project-liquid-summary:empty { display: none; }
 .project-liquid-summary-note { padding: 9px 10px; border-radius: 9px; background: var(--pine-soft); color: var(--pine); font-size: var(--type-caption); line-height: 1.55; }
 .project-liquid-summary-note.warning { background: var(--danger-soft); color: var(--danger); }
-.project-liquid-summary .liquid-table-wrap { width: 100%; max-width: 100%; margin-top: 8px; overflow-x: auto; }
-.project-liquid-summary .liquid-table td:nth-child(4) { min-width: 210px; white-space: normal; overflow-wrap: anywhere; }
+.project-liquid-summary-overview { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 6px; margin-top: 8px; }
+.project-liquid-summary-stat { display: grid; gap: 2px; min-width: 0; padding: 9px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-strong); }
+.project-liquid-summary-stat strong { color: var(--pine); font-size: 17px; }
+.project-liquid-summary-stat span { color: var(--muted); font-size: var(--type-meta); }
 .project-liquid-summary-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
 .project-liquid-summary-actions button { min-height: 32px; padding: 5px 9px; font-size: var(--type-meta); box-shadow: none; }
+
+.summary-drawer[hidden], .project-file-dialog[hidden] { display: none; }
+.summary-drawer, .project-file-dialog { position: fixed; inset: 0; z-index: 120; display: grid; grid-template-columns: minmax(80px,1fr) minmax(760px,1180px); }
+.summary-drawer-backdrop, .project-file-backdrop { border: 0; background: rgba(12,31,29,.42); backdrop-filter: blur(3px); }
+.summary-drawer-panel, .project-file-panel { display: grid; grid-template-rows: auto auto minmax(0,1fr); min-width: 0; height: 100vh; overflow: hidden; background: #f5f8f7; box-shadow: -24px 0 60px rgba(17,47,44,.22); }
+.summary-drawer-header, .project-file-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; padding: 20px 24px 14px; border-bottom: 1px solid var(--line); background: rgba(255,255,255,.94); }
+.summary-drawer-header h2, .project-file-header h2 { margin: 3px 0 0; font-size: 23px; }
+.summary-drawer-header p, .project-file-header p { margin: 4px 0 0; color: var(--muted); font-size: var(--type-caption); }
+.summary-drawer-actions { position: sticky; top: 0; z-index: 2; display: flex; justify-content: flex-end; gap: 7px; padding: 10px 24px; border-bottom: 1px solid var(--line); background: rgba(255,255,255,.96); }
+.summary-drawer-content { min-width: 0; overflow: auto; padding: 16px 24px 30px; }
+.summary-drawer-content .project-liquid-table-wrap { width: 100%; max-width: 100%; overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: #fff; scrollbar-gutter: stable; }
+.summary-drawer-content .liquid-table { min-width: 1120px; }
+.summary-drawer-content .liquid-table td:nth-child(4) { min-width: 260px; white-space: normal; overflow-wrap: anywhere; }
+.summary-drawer-content .liquid-table th { top: 0; }
+
+.project-file-dialog { grid-template-columns: minmax(80px,1fr) minmax(620px,820px); }
+.project-file-panel { grid-template-rows: auto minmax(0,1fr); }
+.project-file-content { min-width: 0; overflow: auto; padding: 18px 24px 32px; }
+.project-file-section { display: grid; gap: 13px; padding: 17px; border: 1px solid var(--line); border-radius: 13px; background: var(--surface-strong); box-shadow: var(--shadow-soft); }
+.project-file-section + .project-file-section { margin-top: 13px; }
+.project-file-section h3 { margin: 0; font-size: 17px; }
+.project-file-section p { margin: 4px 0 0; color: var(--muted); font-size: var(--type-caption); line-height: 1.55; }
+.template-section { border-color: #b9d4ce; background: #f7fbfa; }
+.danger-section { border-color: #e4c9c9; }
+.project-template-actions, .project-file-confirm-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.project-file-dropzone { min-height: 76px; padding: 18px; border: 1px dashed var(--line-strong); border-radius: 11px; background: var(--surface-soft); color: var(--pine); font-weight: 800; }
+.project-file-dropzone:hover { border-color: var(--pine); background: var(--pine-soft); }
+.project-file-preview { display: grid; gap: 7px; }
+.project-file-preview:empty { display: none; }
+.import-preview-card { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 4px 12px; padding: 10px; border: 1px solid var(--line); border-radius: 9px; background: #fff; }
+.import-preview-card strong { font-size: var(--type-caption); }
+.import-preview-card span, .import-preview-card small { color: var(--muted); font-size: var(--type-meta); line-height: 1.5; }
+.import-preview-card small { grid-column: 1 / -1; }
+.danger-confirm-button { min-height: 38px; padding: 7px 12px; border: 1px solid var(--danger); border-radius: 9px; background: var(--danger); color: #fff; font-weight: 800; }
 
 .liquid-drawer[hidden] { display: none; }
 .liquid-drawer { position: fixed; inset: 0; z-index: 100; display: grid; grid-template-columns: minmax(0,1fr) minmax(680px, 940px); }
@@ -561,6 +597,10 @@ label > span { display: block; margin-bottom: 5px; color: var(--muted); font-siz
 .liquid-inline-input { display: grid; grid-template-columns: minmax(0,1fr) 72px; gap: 5px; }
 .liquid-action-row { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 13px; }
 .liquid-action-row .primary-button, .liquid-action-row .secondary-button { min-height: 36px; padding: 6px 11px; font-size: var(--type-caption); }
+.liquid-action-row [data-liquid-action="save"] { border-color: var(--pine); background: var(--pine); color: #fff; box-shadow: 0 7px 16px rgba(18,99,95,.16); }
+.protocol-editor-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 7px; }
+.protocol-editor-state { color: var(--muted); font-size: var(--type-meta); }
+.protocol-editor-state.is-custom { color: #8b5c2f; font-weight: 760; }
 .liquid-result-empty { padding: 34px 16px; border: 1px dashed var(--line-strong); border-radius: 11px; color: var(--muted); font-size: var(--type-caption); line-height: 1.6; text-align: center; }
 .fixed-reagent-list { display: grid; gap: 8px; margin: 9px 0; }
 .fixed-reagent-row { position: relative; display: grid; grid-template-columns: minmax(0,1fr); width: 100%; max-width: 100%; gap: 8px; padding: 10px 38px 10px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-strong); }
@@ -678,6 +718,12 @@ footer { display: flex; justify-content: space-between; gap: 20px; padding: 18px
   .liquid-form-grid { grid-template-columns: 1fr; }
   .liquid-form-grid label.wide, .liquid-subsection { grid-column: 1; }
   .fixed-ratio-sentence { align-items: stretch; }
+  .summary-drawer, .project-file-dialog { grid-template-columns: 1fr; }
+  .summary-drawer-backdrop, .project-file-backdrop { display: none; }
+  .summary-drawer-panel, .project-file-panel { width: 100%; }
+  .summary-drawer-header, .summary-drawer-actions, .summary-drawer-content, .project-file-header, .project-file-content { padding-left: 14px; padding-right: 14px; }
+  .summary-drawer-actions { justify-content: flex-start; overflow-x: auto; }
+  .project-liquid-summary-overview { grid-template-columns: 1fr; }
 }
 
 @media print {

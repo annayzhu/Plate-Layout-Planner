@@ -310,11 +310,25 @@ try {
   await basicForm.locator('button[type="submit"]').click();
   basicResultText = await page.locator("#liquidResultHost").innerText();
   for (const expected of ["理论每孔", "89 µL", "10 µL", "1 µL", "2,349.6 µL", "2,640 µL"]) if (!basicResultText.includes(expected)) throw new Error(`Multi-reagent final-mixture result is missing ${expected}: ${basicResultText}`);
+  if (!basicResultText.includes("新计算 · 尚未保存") || !basicResultText.includes("项目仍使用上一次已保存版本")) throw new Error(`Calculated draft did not distinguish itself from the saved project plan: ${basicResultText}`);
+  if ((await page.locator('[data-liquid-action="save"]').innerText()).trim() !== "更新已保存方案") throw new Error("A later calculation did not present the save action as an update.");
   await page.locator('[data-liquid-action="save"]').click();
+  const replacedLiquidPlanState = await page.evaluate(() => {
+    const workspace = JSON.parse(localStorage.getItem("plate-layout-studio:workspace:v2"));
+    const plans = workspace.plates.find((plate) => plate.id === workspace.activePlateId)?.liquidPlans || [];
+    return { count: plans.length, id: plans[0]?.id, module: plans[0]?.module };
+  });
+  if (replacedLiquidPlanState.count !== 1 || replacedLiquidPlanState.id !== savedLiquidPlans[0].id || replacedLiquidPlanState.module !== "basic") {
+    throw new Error(`Updating a saved plan did not atomically replace it while preserving identity: ${JSON.stringify(replacedLiquidPlanState)}`);
+  }
+  if (!(await page.locator("#liquidResultHost").innerText()).includes("已保存 · 当前有效")) throw new Error("A successful update did not expose the saved-current state.");
   await page.locator('[data-liquid-action="save-preset"]').click();
   const fixedRecipeId = await page.locator("[data-liquid-library-select]").inputValue();
   await page.locator("#closeLiquidDrawerButton").click();
   await page.locator('.liquid-module-launch[data-liquid-module="basic"]').click();
+  if (await page.locator('#liquidActiveForm [name="calculationType"]').count() !== 1) {
+    throw new Error(`Reopening the basic calculator did not render its form. Browser errors: ${errors.join(" | ")}; drawer hidden=${await page.locator("#liquidDrawer").getAttribute("hidden")}; content=${(await page.locator("#liquidDrawerContent").innerText()).slice(0, 500)}`);
+  }
   if ((await page.locator('#liquidActiveForm [name="fixedMeaning"]').inputValue()) !== "final" || await page.locator("#liquidActiveForm [data-fixed-reagent-row]").count() !== 2) throw new Error("Fixed-ratio draft was not restored after closing and reopening the drawer.");
   await page.locator('#liquidActiveForm [name="calculationType"]').selectOption("dilution");
   await page.locator('#liquidActiveForm button[type="submit"]').click();
@@ -327,6 +341,9 @@ try {
   if (await page.locator("#liquidActiveForm [data-fixed-reagent-row]").count() !== 2) throw new Error("Resetting stock dilution erased the fixed-ratio task draft.");
   await page.locator("[data-liquid-library-select]").selectOption(fixedRecipeId);
   await page.locator('[data-liquid-action="load-preset"]').click();
+  if (await page.locator('#liquidActiveForm [name="calculationType"]').count() !== 1) {
+    throw new Error(`Loading the saved fixed-ratio preset removed the active form. Browser errors: ${errors.join(" | ")}; content=${(await page.locator("#liquidDrawerContent").innerText()).slice(0, 500)}`);
+  }
   if ((await page.locator('#liquidActiveForm [name="calculationType"]').inputValue()) !== "fixed" || await page.locator("#liquidActiveForm [data-fixed-reagent-row]").count() !== 2) throw new Error("Saved fixed-ratio recipe did not reload correctly.");
   await page.locator('#liquidActiveForm [data-fixed-reagent-row]').nth(1).locator('[data-liquid-action="remove-fixed-reagent"]').click();
   const tinyReagent = page.locator('#liquidActiveForm [data-fixed-reagent-row]').first();
@@ -883,6 +900,7 @@ try {
     await page.locator('[data-well="B1"]').click({ modifiers: ["Control"] });
     await page.locator('.liquid-module-launch[data-liquid-module="transfection"]').click();
     await page.locator('#liquidActiveForm [name="groupDimension"]').selectOption({ label: "处理" });
+    await page.locator('#liquidActiveForm [name="mergeCommonMix"]').selectOption("on");
     if (plateIndex === 0) await page.locator('#liquidActiveForm [name="groupRoleLines"]').fill("Mock=Mock");
     await page.locator('#liquidActiveForm button[type="submit"]').click();
     const singlePlatePhases = await page.locator("#liquidResultHost .operator-execution-table tbody tr td:nth-child(2)").allInnerTexts();
@@ -935,7 +953,7 @@ try {
     const key = "plate-layout-studio:workspace:v2";
     const savedWorkspace = JSON.parse(localStorage.getItem(key));
     const sourcePlan = savedWorkspace.plates[0].liquidPlans.find((plan) => plan.module === "transfection");
-    savedWorkspace.plates[0].liquidPlans.push({ ...sourcePlan, id: "legacy-execution-plan-v1", name: "Legacy transfection v1", executionPlanVersion: 1, executionPlanSnapshot: undefined });
+    savedWorkspace.plates[0].liquidPlans.push({ ...sourcePlan, id: "legacy-execution-plan-v1", name: "Legacy transfection v1", executionPlanVersion: 1, executionPlanSnapshot: undefined, updatedAt: "2020-01-01T00:00:00.000Z" });
     savedWorkspace.updatedAt = new Date(Date.now() + 1000).toISOString();
     localStorage.setItem(key, JSON.stringify(savedWorkspace));
     await new Promise((resolve, reject) => {
@@ -951,10 +969,20 @@ try {
     });
   });
   await page.reload({ waitUntil: "networkidle" });
+  const migratedPlanState = await page.evaluate(() => {
+    const savedWorkspace = JSON.parse(localStorage.getItem("plate-layout-studio:workspace:v2"));
+    return {
+      current: savedWorkspace.plates[0].liquidPlans.map((plan) => plan.id),
+      archived: (savedWorkspace.plates[0].archivedLiquidPlans || []).map((plan) => plan.id),
+    };
+  });
+  if (migratedPlanState.current.length !== 1 || !migratedPlanState.archived.includes("legacy-execution-plan-v1")) {
+    throw new Error(`Legacy duplicate plans were not migrated to one current plan plus inert archive: ${JSON.stringify(migratedPlanState)}`);
+  }
   await page.locator("#xlsxOrderSelect").selectOption("Z");
   await page.locator("#projectLiquidScope").selectOption("all");
   await page.locator("#projectLiquidSummaryButton").click();
-  if (!(await page.locator("#projectLiquidSummary").innerText()).includes("旧方案")) throw new Error("A legacy execution-plan snapshot entered the current summary without a recalculation warning.");
+  if ((await page.locator("#projectLiquidSummary").innerText()).includes("旧方案")) throw new Error("An archived legacy duplicate still entered the current summary.");
   await page.locator("[data-open-liquid-summary]").click();
   const transfectionSummaryText = await page.locator("#summaryDrawerContent").innerText();
   if (transfectionSummaryText.includes("transfection:{") || transfectionSummaryText.includes('"cargoLines"')) throw new Error(`Internal recipe keys leaked into the operator summary: ${transfectionSummaryText.slice(0, 500)}`);
@@ -1045,6 +1073,116 @@ try {
   await page.locator("#undoButton").click();
   if (await page.locator(".plate-tab").count() !== 4) throw new Error("Project-level undo did not restore the deleted plate.");
 
+  // Issue #28 exact regression fixture: four chemically identical A549 plates must
+  // contribute exactly once per treatment after legacy duplicate normalization.
+  await page.evaluate(async () => {
+    const key = "plate-layout-studio:workspace:v2";
+    const savedWorkspace = JSON.parse(localStorage.getItem(key));
+    const sourcePlans = savedWorkspace.plates.map((plate) => plate.liquidPlans?.[0]).filter((plan) => plan?.module === "transfection").slice(0, 2);
+    if (sourcePlans.length !== 2) throw new Error("Issue #28 fixture requires two source transfection plans.");
+    const treatmentWells = { Mock: "A1", "NC-FAM": "A2", "siFBN2-1": "A3", "siFBN2-2": "B1", "siFBN2-3": "B2", "siFBN2-4": "B3" };
+    const treatmentOrder = Object.keys(treatmentWells);
+    const sourceContributions = sourcePlans.flatMap((plan) => plan.contributions || []);
+    const template = savedWorkspace.plates.find((plate) => plate.liquidPlans?.[0]?.module === "transfection");
+    const treatmentDimension = template.dimensions.find((dimension) => dimension.name === "处理") || { id: "treatment", name: "处理", type: "text", unit: "" };
+    savedWorkspace.plates = Array.from({ length: 4 }, (_, index) => {
+      const id = `issue28-a549-${index + 1}`;
+      const name = `A549-${index + 1}`;
+      const plan = structuredClone(sourcePlans[0]);
+      plan.id = `issue28-plan-${index + 1}`;
+      plan.name = "RNAiMAX + siRNA";
+      plan.scopeWellIds = Object.values(treatmentWells);
+      plan.createdAt = plan.updatedAt = new Date(Date.now() + index).toISOString();
+      plan.stale = false;
+      plan.status = "saved";
+      plan.contributions = sourceContributions.map((item) => {
+        const treatment = item.cargoIdentity || item.groupName;
+        return { ...structuredClone(item), plateId: id, plateName: name, planName: plan.name, groupName: treatment, displayOrder: Math.max(0, treatmentOrder.indexOf(treatment)), scopeWellIds: [treatmentWells[treatment] || "A1"] };
+      });
+      const wells = Object.fromEntries(Object.entries(treatmentWells).map(([treatment, wellId]) => [wellId, { params: { [treatmentDimension.id]: treatment } }]));
+      return {
+        ...structuredClone(template), id, name, plateSize: 6,
+        dimensions: [treatmentDimension], plates: { 6: wells, 12: {}, 24: {}, 96: {}, 384: {} },
+        liquidPlans: [plan], archivedLiquidPlans: [], calculationLog: [], calculationOutputs: [],
+      };
+    });
+    savedWorkspace.activePlateId = savedWorkspace.plates[0].id;
+    savedWorkspace.latestLiquidSummary = null;
+    savedWorkspace.updatedAt = new Date().toISOString();
+    localStorage.setItem(key, JSON.stringify(savedWorkspace));
+    await new Promise((resolve, reject) => {
+      const request = indexedDB.open("plate-layout-studio", 1);
+      request.onsuccess = () => {
+        const db = request.result;
+        const transaction = db.transaction("workspaces", "readwrite");
+        transaction.objectStore("workspaces").put(savedWorkspace, "active");
+        transaction.oncomplete = () => { db.close(); resolve(); };
+        transaction.onerror = () => reject(transaction.error);
+      };
+      request.onerror = () => reject(request.error);
+    });
+  });
+  await page.reload({ waitUntil: "networkidle" });
+  await page.locator("#projectLiquidScope").selectOption("all");
+  await page.locator("#projectLiquidSummaryButton").click();
+  await page.locator("[data-open-liquid-summary]").click();
+  const issue28Labels = await page.locator("#summaryDrawerContent .operator-preparation-table tbody tr td:nth-child(2)").allInnerTexts();
+  const issue28UniqueLabels = issue28Labels.filter((value, index) => index === 0 || value !== issue28Labels[index - 1]);
+  const issue28ExpectedLabels = ["Mock · A", "NC-FAM · A", "siFBN2-1 · A", "siFBN2-2 · A", "siFBN2-3 · A", "siFBN2-4 · A", "RNAiMAX + siRNA · B"];
+  if (issue28UniqueLabels.join("|") !== issue28ExpectedLabels.join("|")) throw new Error(`Issue #28 four-plate fixture produced duplicate or missing preparations: ${issue28UniqueLabels.join(" | ")}`);
+  const issue28Targets = await page.locator("#summaryDrawerContent .operator-preparation-table tbody tr td:nth-child(10)").allInnerTexts();
+  if (issue28Targets.some((target) => !["A549-1", "A549-2", "A549-3", "A549-4"].every((plate) => target.includes(plate)))) {
+    throw new Error(`Issue #28 merged preparations do not all target four plates: ${issue28Targets.join(" | ")}`);
+  }
+  const issue28CsvPromise = page.waitForEvent("download");
+  await page.locator('[data-project-liquid-export="csv"]').click();
+  const issue28Csv = await readFile(await (await issue28CsvPromise).path(), "utf8");
+  for (const label of issue28ExpectedLabels) if (!issue28Csv.includes(label)) throw new Error(`Issue #28 CSV is missing ${label}.`);
+  if (issue28Csv.includes("transfection:{") || issue28Csv.includes('"cargoLines"')) throw new Error("Issue #28 CSV exposed an internal compatibility key.");
+  const issue28XlsxPromise = page.waitForEvent("download");
+  await page.locator('[data-project-liquid-export="xlsx"]').click();
+  const issue28Workbook = await XlsxCore.parseWorkbook(await readFile(await (await issue28XlsxPromise).path()));
+  const issue28CargoSheet = issue28Workbook.sheets.find((sheet) => sheet.name === "独立处理液");
+  const issue28XlsxLabels = (issue28CargoSheet?.rows || []).slice(1).map((row) => String(row[1] || "")).filter((value, index, values) => value && (index === 0 || value !== values[index - 1]));
+  if (issue28XlsxLabels.join("|") !== issue28ExpectedLabels.slice(0, 6).join("|")) throw new Error(`Issue #28 XLSX did not preserve one row group per treatment: ${issue28XlsxLabels.join(" | ")}`);
+  await page.screenshot({ path: resolve(outputDirectory, "08-issue-28-four-plate-merge.png"), fullPage: true });
+  await page.locator("#closeSummaryDrawerButton").click();
+  await page.evaluate(async () => {
+    const key = "plate-layout-studio:workspace:v2";
+    const savedWorkspace = JSON.parse(localStorage.getItem(key));
+    const changedPlan = savedWorkspace.plates[3].liquidPlans[0];
+    for (const item of changedPlan.contributions.filter((entry) => entry.cargoIdentity === "NC-FAM")) {
+      item.groupKey += ":different-volume";
+      item.compatibilityKey += ":different-volume";
+      if (item.compatibilityProfile?.components?.length) item.compatibilityProfile.components[0].perWellVolumeUL += 0.25;
+    }
+    savedWorkspace.latestLiquidSummary = null;
+    localStorage.setItem(key, JSON.stringify(savedWorkspace));
+    await new Promise((resolve, reject) => {
+      const request = indexedDB.open("plate-layout-studio", 1);
+      request.onsuccess = () => {
+        const db = request.result;
+        const transaction = db.transaction("workspaces", "readwrite");
+        transaction.objectStore("workspaces").put(savedWorkspace, "active");
+        transaction.oncomplete = () => { db.close(); resolve(); };
+        transaction.onerror = () => reject(transaction.error);
+      };
+      request.onerror = () => reject(request.error);
+    });
+  });
+  await page.reload({ waitUntil: "networkidle" });
+  await page.locator("#projectLiquidScope").selectOption("all");
+  await page.locator("#projectLiquidSummaryButton").click();
+  const issue28SplitSummary = await page.locator("#projectLiquidSummary").innerText();
+  if (!issue28SplitSummary.includes("每孔组分或体积不同") || issue28SplitSummary.includes("transfection:{")) {
+    throw new Error(`A real preparation difference did not produce an operator-facing separation reason: ${issue28SplitSummary}`);
+  }
+  await page.locator("[data-open-liquid-summary]").click();
+  const issue28SplitLabels = await page.locator("#summaryDrawerContent .operator-preparation-table tbody tr td:nth-child(2)").allInnerTexts();
+  if (issue28SplitLabels.filter((label) => label === "NC-FAM · A").length < 2) throw new Error("A real NC-FAM volume difference was incorrectly merged.");
+  await page.screenshot({ path: resolve(outputDirectory, "09-issue-28-merge-explanation.png"), fullPage: true });
+  await page.locator("#closeSummaryDrawerButton").click();
+
   await page.evaluate(async () => {
     localStorage.clear();
     await new Promise((resolve) => {
@@ -1109,6 +1247,9 @@ try {
     spreadsheetImport: "Excel-compatible CSV created a 12-well plate with units and quoted values",
     multiPlateWorkspace: "same-format plates stayed isolated; overview, duplication, deletion, project undo, persistence, and XLSX round-trip passed",
     crossPlateLiquid: "two compatible saved plans exposed per-plate contributions, merged before one shared 10% overage, and split by container capacity",
+    issue28SinglePlanLifecycle: "first save created one plan; later save replaced it with a stable identity; legacy duplicates migrated to an inert archive",
+    issue28FourPlateFixture: "Mock, NC-FAM, six treatment-specific/common preparations merged once across A549-1 through A549-4; CSV and XLSX were read back",
+    issue28CompatibilityExplanation: "a deliberate per-well composition difference remained separate with an operator-facing reason and no internal key",
     transfectionExecutionPlan: "single-plate UI/save/reopen/copy/CSV/print, cross-plate UI/copy/CSV/XLSX, and project XLSX consumed one versioned plan; legacy v1 was blocked",
     checkedPlateAccessibility: "compact checkbox remained keyboard reachable, visibly focused, translated, and narrow-sidebar safe",
     xlsxExecutionOrder: "N remained the default; optional Z produced A1, A2, A3 in the exported six-well plate sheet",

@@ -655,6 +655,12 @@ label > span { display: block; margin-bottom: 5px; color: var(--muted); font-siz
 .fixed-reagent-row > small { grid-column: 1 / -1; color: var(--pine); font-size: var(--type-meta); line-height: 1.5; }
 .liquid-result-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
 .liquid-result-meta span { padding: 4px 7px; border-radius: 7px; background: var(--pine-soft); color: var(--pine); font-size: var(--type-meta); font-weight: 780; }
+.liquid-result-publish-state { display: grid; gap: 2px; margin-bottom: 12px; padding: 9px 11px; border: 1px solid var(--line); border-radius: 10px; font-size: var(--type-caption); line-height: 1.45; }
+.liquid-result-publish-state strong { color: var(--pine); }
+.liquid-result-publish-state span { color: var(--muted); }
+.liquid-result-publish-state.is-current { border-color: #b9d4ce; background: #f1f8f6; }
+.liquid-result-publish-state.is-draft { border-color: #dfcfaa; background: #fffaf0; }
+.compatibility-explanation ul { display: grid; gap: 6px; margin: 0; padding-left: 22px; color: var(--muted); font-size: var(--type-caption); line-height: 1.5; }
 .liquid-table-wrap { max-width: 100%; overflow: auto; border: 1px solid var(--line); border-radius: 10px; }
 .liquid-table { width: 100%; border-collapse: collapse; font-size: var(--type-caption); white-space: nowrap; }
 .liquid-table th, .liquid-table td { padding: 7px 8px; border-bottom: 1px solid var(--line); text-align: left; }

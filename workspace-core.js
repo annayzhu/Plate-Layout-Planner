@@ -194,10 +194,31 @@
       const factor = VOLUME_TO_UL[item.unit];
       const base = Number(item.baseVolume);
       if (!factor || !Number.isFinite(base) || base < 0 || !item.groupKey || !item.component) continue;
-      if (!groups.has(item.groupKey)) groups.set(item.groupKey, { key: item.groupKey, plates: new Map(), components: new Map(), warnings: [] });
+      if (!groups.has(item.groupKey)) groups.set(item.groupKey, {
+        key: item.groupKey,
+        label: item.groupLabel || item.groupKey,
+        tubeRole: item.tubeRole || "standard",
+        tube: item.tube || "",
+        cargoIdentity: item.cargoIdentity || "",
+        recipeNames: new Set(),
+        plates: new Map(),
+        sources: new Map(),
+        components: new Map(),
+        warnings: [],
+      });
       const group = groups.get(item.groupKey);
       if (!group.plates.has(item.plateId)) group.plates.set(item.plateId, { plateId: item.plateId, plateName: item.plateName || item.plateId });
-      const component = group.components.get(item.component) || { name: item.component, baseVolume: 0, unit: "µL", perPlate: [] };
+      if (item.planName) group.recipeNames.add(item.planName);
+      const sourceKey = `${item.plateId}\u0000${item.planName || ""}\u0000${item.groupName || ""}`;
+      if (!group.sources.has(sourceKey)) group.sources.set(sourceKey, {
+        plateId: item.plateId,
+        plateName: item.plateName || item.plateId,
+        planName: item.planName || "",
+        groupName: item.groupName || "",
+        scopeWellIds: Array.isArray(item.scopeWellIds) ? [...item.scopeWellIds] : [],
+        protocolSteps: Array.isArray(item.protocolSteps) ? [...item.protocolSteps] : [],
+      });
+      const component = group.components.get(item.component) || { name: item.component, baseVolume: 0, unit: "µL", perWellVolume: Number(item.perWellVolume) || 0, perPlate: [] };
       const volume = base * factor;
       component.baseVolume += volume;
       component.perPlate.push({ plateId: item.plateId, volume });
@@ -207,14 +228,22 @@
     return {
       groups: [...groups.values()].map((group) => ({
         key: group.key,
+        label: group.label,
+        tubeRole: group.tubeRole,
+        tube: group.tube,
+        cargoIdentity: group.cargoIdentity,
+        recipeNames: [...group.recipeNames],
         plates: [...group.plates.values()],
+        sources: [...group.sources.values()],
         components: [...group.components.values()].map((component) => {
           const preparedVolume = component.baseVolume * multiplier;
           return {
             ...component,
             preparedVolume,
             containerCount: Number.isFinite(maxContainerVolume) && maxContainerVolume > 0 ? Math.max(1, Math.ceil(preparedVolume / maxContainerVolume)) : 1,
-            warning: component.perPlate.some((item) => item.volume < minPipetteVolume) ? "below-minimum-pipette-volume" : "",
+            warning: (component.perWellVolume > 0 && component.perWellVolume < minPipetteVolume) || component.perPlate.some((item) => item.volume < minPipetteVolume)
+              ? "below-minimum-pipette-volume"
+              : "",
           };
         }),
       })),

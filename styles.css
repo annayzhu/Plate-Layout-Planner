@@ -159,6 +159,8 @@ button:focus-visible, .file-button:focus-within, .well:focus-visible {
 .plate-tab small { color: var(--muted); font-size: 10px; font-weight: 700; }
 .plate-tab.active { border-color: var(--pine); background: var(--pine-soft); color: var(--pine-strong); box-shadow: inset 0 0 0 1px rgba(15,91,87,.08); }
 .workspace-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 5px; }
+.workspace-export-actions { grid-column: 2 / 4; display: flex; min-width: 0; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 5px; padding-top: 8px; border-top: 1px solid var(--line); }
+.workspace-export-label { margin-inline-end: 3px; color: var(--muted); font-size: var(--type-meta); font-weight: 800; }
 .compact-button { min-height: 38px !important; padding: 7px 10px !important; font-size: 11px !important; white-space: nowrap; }
 .icon-action { width: 34px; height: 34px; padding: 0; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-strong); color: var(--pine); font-size: 15px; font-weight: 800; }
 .danger-action { color: var(--danger); }
@@ -351,7 +353,7 @@ label > span { display: block; margin-bottom: 5px; color: var(--muted); font-siz
 .legend-empty { color: var(--muted); font-size: var(--type-caption); }
 .well-display-note { flex: 0 1 360px; margin: 0; color: var(--muted); font-size: var(--type-caption); line-height: 1.55; text-align: right; }
 
-.side-stack { position: sticky; top: 80px; display: grid; max-height: calc(100dvh - 96px); gap: 12px; overflow-y: auto; padding-right: 4px; scrollbar-color: var(--line-strong) transparent; }
+.side-stack { position: sticky; top: 80px; display: grid; max-width: 100%; max-height: calc(100dvh - 96px); min-width: 0; gap: 12px; overflow-x: hidden; overflow-y: auto; padding-right: 4px; scrollbar-color: var(--line-strong) transparent; }
 .collapsible-card { overflow: clip; }
 .collapsible-summary { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: -8px; padding: 8px; border-radius: 10px; cursor: pointer; list-style: none; transition: background 140ms ease; }
 .collapsible-summary::-webkit-details-marker { display: none; }
@@ -478,7 +480,27 @@ label > span { display: block; margin-bottom: 5px; color: var(--muted); font-siz
 .liquid-module-launch strong { overflow: hidden; font-size: var(--type-caption); text-overflow: ellipsis; white-space: nowrap; }
 .liquid-module-launch small { overflow: hidden; color: var(--muted); font-size: var(--type-meta); text-overflow: ellipsis; white-space: nowrap; }
 .liquid-card-note { margin: 9px 0 0; color: var(--muted); font-size: var(--type-meta); line-height: 1.5; text-align: center; }
-.project-liquid-panel { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); }
+.saved-liquid-plans { min-width: 0; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); }
+.saved-liquid-plans-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.saved-liquid-plans-heading h3 { margin: 0; font-size: 15px; letter-spacing: -.02em; }
+.saved-liquid-plans-heading p { margin: 3px 0 0; color: var(--muted); font-size: var(--type-caption); line-height: 1.5; }
+.saved-liquid-plan-list { display: grid; min-width: 0; gap: 6px; margin-top: 9px; }
+.saved-liquid-empty { display: grid; gap: 2px; padding: 10px; border: 1px dashed var(--line-strong); border-radius: 10px; background: var(--surface-soft); }
+.saved-liquid-empty strong { font-size: var(--type-caption); }
+.saved-liquid-empty span { color: var(--muted); font-size: var(--type-meta); line-height: 1.5; }
+.saved-liquid-plan { display: grid; grid-template-columns: auto minmax(0,1fr) auto; gap: 3px 8px; align-items: center; min-width: 0; padding: 8px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-strong); }
+.saved-liquid-plan.is-current { border-color: #b9d4ce; background: #f7fbfa; }
+.saved-liquid-plan.is-stale { background: #fbf6f5; }
+.saved-liquid-plan-state { padding: 3px 6px; border-radius: 6px; background: var(--pine-soft); color: var(--pine); font-size: var(--type-meta); font-weight: 820; }
+.saved-liquid-plan.is-stale .saved-liquid-plan-state { background: var(--danger-soft); color: var(--danger); }
+.saved-liquid-plan-name { min-width: 0; height: 30px; padding: 3px 6px; border-color: transparent; background: transparent; font-size: var(--type-caption); font-weight: 790; text-overflow: ellipsis; }
+.saved-liquid-plan-name:hover, .saved-liquid-plan-name:focus { border-color: var(--line-strong); background: #fff; }
+.saved-liquid-plan-meta { grid-column: 2; overflow: hidden; color: var(--muted); font-size: var(--type-meta); text-overflow: ellipsis; white-space: nowrap; }
+.saved-liquid-plan-actions { grid-column: 3; grid-row: 1 / 3; display: flex; gap: 3px; }
+.saved-liquid-plan-actions button { min-height: 30px; padding: 4px 7px; border: 1px solid var(--line); border-radius: 7px; background: #fff; color: var(--pine); font-size: var(--type-meta); font-weight: 780; }
+.saved-liquid-plan-actions .danger-text { color: var(--danger); }
+.saved-liquid-plan-actions .confirming { border-color: var(--danger); background: var(--danger); color: #fff; }
+.project-liquid-panel { max-width: 100%; min-width: 0; margin-top: 14px; padding-top: 14px; overflow: hidden; border-top: 1px solid var(--line); }
 .project-liquid-heading, .project-liquid-controls { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .project-liquid-heading h3 { margin: 0; font-size: 15px; letter-spacing: -.02em; }
 .project-liquid-heading p { margin: 3px 0 0; color: var(--muted); font-size: var(--type-caption); line-height: 1.5; }
@@ -493,11 +515,14 @@ label > span { display: block; margin-bottom: 5px; color: var(--muted); font-siz
 .project-liquid-plate-picker { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 10px; }
 .project-liquid-plate-picker label { display: inline-flex; align-items: center; gap: 6px; padding: 6px 9px; border: 1px solid var(--line); border-radius: 999px; background: var(--paper); font-size: var(--type-meta); }
 .project-liquid-plate-picker input { margin: 0; }
-.project-liquid-summary { margin-top: 10px; }
+.project-liquid-summary { width: 100%; max-width: 100%; min-width: 0; margin-top: 10px; overflow: hidden; }
 .project-liquid-summary:empty { display: none; }
 .project-liquid-summary-note { padding: 9px 10px; border-radius: 9px; background: var(--pine-soft); color: var(--pine); font-size: var(--type-caption); line-height: 1.55; }
 .project-liquid-summary-note.warning { background: var(--danger-soft); color: var(--danger); }
-.project-liquid-summary .liquid-table-wrap { margin-top: 8px; }
+.project-liquid-summary .liquid-table-wrap { width: 100%; max-width: 100%; margin-top: 8px; overflow-x: auto; }
+.project-liquid-summary .liquid-table td:nth-child(4) { min-width: 210px; white-space: normal; overflow-wrap: anywhere; }
+.project-liquid-summary-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
+.project-liquid-summary-actions button { min-height: 32px; padding: 5px 9px; font-size: var(--type-meta); box-shadow: none; }
 
 .liquid-drawer[hidden] { display: none; }
 .liquid-drawer { position: fixed; inset: 0; z-index: 100; display: grid; grid-template-columns: minmax(0,1fr) minmax(680px, 940px); }
@@ -524,6 +549,11 @@ label > span { display: block; margin-bottom: 5px; color: var(--muted); font-siz
 .liquid-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
 .liquid-form-grid label { display: grid; align-content: start; gap: 4px; min-width: 0; color: var(--ink-soft); font-size: var(--type-caption); font-weight: 760; }
 .liquid-form-grid label.wide { grid-column: 1 / -1; }
+.liquid-protocol-editor { grid-column: 1 / -1; }
+.liquid-protocol-editor summary { display: grid; gap: 3px; padding: 4px 0; cursor: pointer; }
+.liquid-protocol-editor summary strong { margin: 0; }
+.liquid-protocol-editor summary span { color: var(--muted); font-size: var(--type-meta); line-height: 1.5; }
+.liquid-protocol-editor[open] summary { margin-bottom: 7px; }
 .liquid-form-grid input, .liquid-form-grid select { min-height: 38px; padding: 6px 8px; border-radius: 8px; font-size: var(--type-control); }
 .liquid-scope-field input[readonly] { border-color: #b9cec9; background: #edf4f2; color: var(--pine); cursor: not-allowed; font-weight: 850; }
 .liquid-scope-help { display: block; color: #8a5a2f; font-size: var(--type-meta); font-weight: 700; line-height: 1.5; }
@@ -604,6 +634,7 @@ footer { display: flex; justify-content: space-between; gap: 20px; padding: 18px
   .page-shell { width: min(100% - 22px, 1480px); padding-top: 16px; }
   .workspace-command { grid-template-columns: 1fr; align-items: stretch; }
   .workspace-actions { justify-content: flex-start; }
+  .workspace-export-actions { grid-column: 1; justify-content: flex-start; }
   .plate-overview-heading { align-items: stretch; flex-direction: column; }
   .overview-color-control { width: 100%; }
   .hero { padding-bottom: 12px; }

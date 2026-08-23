@@ -330,6 +330,25 @@ test("common master mix components require identical volume and overage settings
   assert.deepEqual(partiallyCompatible, []);
 });
 
+test("diluent in a cargo-containing tube is never promoted to common master mix", () => {
+  const calculate = (cargoName) => Liquid.calculateRnaiMaxTransfection({
+    cargoName,
+    wellCount: 6,
+    overagePercent: 10,
+    finalVolume: 300,
+    complexVolume: 30,
+    stockConcentration: 10,
+    stockUnit: "µM",
+    targetValue: 10,
+    targetUnit: "nM",
+    reagentPerWell: 0.9,
+  });
+  const common = Liquid.commonTransfectionComponents([calculate("siFBN2-1"), calculate("siFBN2-2")]);
+
+  assert.deepEqual(common.sort(), ["B\u0000Opti-MEM", "B\u0000RNAiMAX"].sort());
+  assert.equal(common.includes("A\u0000Opti-MEM"), false);
+});
+
 test("cargo collections are never merged into a common master mix", () => {
   const definition = {
     wellCount: 2,
@@ -349,7 +368,7 @@ test("cargo collections are never merged into a common master mix", () => {
   };
   const first = Liquid.calculateGenericTransfection(definition);
   const second = Liquid.calculateGenericTransfection(definition);
-  assert.deepEqual(Liquid.commonTransfectionComponents([first, second]), ["A\u0000Opti-MEM"]);
+  assert.deepEqual(Liquid.commonTransfectionComponents([first, second]), []);
 });
 
 test("drug layout stops without partial assignments when capacity is insufficient", () => {

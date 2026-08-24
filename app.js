@@ -1862,6 +1862,10 @@
     else elements.projectName.removeAttribute("aria-invalid");
   }
 
+  function duplicatePlateNameMessage(conflict) {
+    return conflict ? bilingual(`板号已被“${conflict.name}”使用，请输入唯一名称。`, `This name is already used by “${conflict.name}”. Enter a unique name.`) : "";
+  }
+
   function resetPlateLayoutClearConfirmation() {
     window.clearTimeout(plateLayoutClearTimer);
     plateLayoutClearTimer = null;
@@ -2056,7 +2060,7 @@
 
   elements.projectName.addEventListener("input", () => {
     const conflict = Workspace.plateNameConflict(workspace, elements.projectName.value, project.id);
-    setPlateNameError(conflict ? bilingual(`板号已被“${conflict.name}”使用，请输入唯一名称。`, `This name is already used by “${conflict.name}”. Enter a unique name.`) : "");
+    setPlateNameError(duplicatePlateNameMessage(conflict));
   });
   elements.projectName.addEventListener("keydown", (event) => {
     if (event.key === "Enter") elements.projectName.blur();
@@ -2065,7 +2069,7 @@
     const normalizedName = elements.projectName.value.trim() || t("defaultProject");
     const conflict = Workspace.plateNameConflict(workspace, normalizedName, project.id);
     if (conflict) {
-      setPlateNameError(bilingual(`板号已被“${conflict.name}”使用，请输入唯一名称。`, `This name is already used by “${conflict.name}”. Enter a unique name.`));
+      setPlateNameError(duplicatePlateNameMessage(conflict));
       window.queueMicrotask(() => elements.projectName.focus());
       return;
     }

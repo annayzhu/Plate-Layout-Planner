@@ -56,6 +56,26 @@ test("compares plate names after trimming, unicode normalization, and case foldi
   assert.equal(Workspace.plateNameConflict(workspace, "Plate C", workspace.plates[1].id), null);
 });
 
+test("generates a unique bounded copy name even when the source name is 80 characters", () => {
+  const longName = "A".repeat(80);
+  let workspace = Workspace.createWorkspace({ plateName: longName, plateSize: 24 });
+  workspace = Workspace.duplicatePlate(workspace, workspace.plates[0].id, "structure");
+  const copy = Workspace.activePlate(workspace);
+  assert.equal(copy.name.length <= 80, true);
+  assert.notEqual(Workspace.normalizePlateName(copy.name), Workspace.normalizePlateName(longName));
+  assert.equal(Workspace.plateNameConflict(workspace, copy.name, copy.id), null);
+});
+
+test("normalization preserves well maps from every format of a physical plate", () => {
+  const workspace = Workspace.createWorkspace({ plateName: "Multi-format", plateSize: 96 });
+  workspace.plates[0].plates[96].A1 = { params: { sample: "visible" } };
+  workspace.plates[0].plates[24].B2 = { params: { sample: "stored" } };
+
+  const restored = Workspace.normalizeWorkspace(JSON.parse(JSON.stringify(workspace)));
+  assert.equal(restored.plates[0].plates[96].A1.params.sample, "visible");
+  assert.equal(restored.plates[0].plates[24].B2.params.sample, "stored");
+});
+
 test("clears a physical plate layout while preserving structure and making its plan stale", () => {
   const plate = Workspace.createPlate({
     id: "p1",

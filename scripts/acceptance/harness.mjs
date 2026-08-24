@@ -106,6 +106,10 @@ export async function createAcceptanceHarness({
     await page.goto(baseUrl, { waitUntil: "networkidle" });
   }
 
+  async function readWorkspace() {
+    return page.evaluate(() => JSON.parse(localStorage.getItem("plate-layout-studio:workspace:v2")));
+  }
+
   async function download(action) {
     const pending = page.waitForEvent("download");
     await action();
@@ -135,6 +139,7 @@ export async function createAcceptanceHarness({
         baseUrl,
         outputDirectory: resolvedOutput,
         persistWorkspace,
+        readWorkspace,
         clearPersistence,
         download,
         downloadText,
@@ -158,6 +163,7 @@ export async function createAcceptanceHarness({
     errors,
     baseUrl,
     outputDirectory: resolvedOutput,
+    readWorkspace,
     XlsxCore,
     clearPersistence,
     openClean,

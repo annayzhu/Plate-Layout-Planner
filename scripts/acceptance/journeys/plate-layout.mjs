@@ -1,6 +1,6 @@
 import { resolve } from "node:path";
 
-export async function plateLayoutJourney({ page, outputDirectory }) {
+export async function plateLayoutJourney({ page, outputDirectory, persistWorkspace, readWorkspace }) {
   if (await page.locator(".well").count() !== 24) throw new Error("Initial 24-well plate did not render.");
   if (await page.locator("#plateCanvas > .plate-interaction-help").count() !== 1) throw new Error("Selection guidance is not inside the plate canvas.");
 
@@ -39,14 +39,58 @@ export async function plateLayoutJourney({ page, outputDirectory }) {
   const lines = await page.locator('[data-well="A1"] .well-primary, [data-well="A1"] .well-secondary, [data-well="A1"] .well-tertiary').allInnerTexts();
   if (lines.join("|") !== "Sample-A|Drug A|2") throw new Error(`The first three dimensions were not rendered together: ${lines.join("|")}`);
 
+  const clearFixture = await readWorkspace();
+  const fixturePlate = clearFixture.plates.find((plate) => plate.id === clearFixture.activePlateId);
+  fixturePlate.plates[6].A1 = { params: { sample: "Stored-six-well-value" } };
+  fixturePlate.dimensions.push({ id: "calculated", name: "计算结果", type: "number", unit: "µL" });
+  fixturePlate.plates[24].A1.params.calculated = 8;
+  fixturePlate.calculationOutputs = [{ id: "calculated", sourceId: "value" }];
+  fixturePlate.calculationLog = [{ outputId: "calculated" }];
+  fixturePlate.liquidPlans = [{ id: "plan-issue-35", name: "Saved plan", status: "saved", stale: false }];
+  await persistWorkspace(clearFixture);
+  await page.locator('[data-well="A1"]').click();
+
   await page.locator("#clearPlateLayoutButton").click();
   await page.locator("#clearPlateLayoutButton").click();
   if ((await page.locator('[data-well="A1"]').innerText()).includes("Sample-A")) throw new Error("Clear current plate did not remove assigned well values.");
   if ((await page.locator("#projectName").inputValue()) !== "Treatment Plate") throw new Error("Clear current plate changed the plate name.");
   if (await page.locator(".dimension-row").count() < 6) throw new Error("Clear current plate removed user parameter dimensions.");
+  if ((await page.locator("#selectionCount").innerText()) !== "已选 0 孔") throw new Error("Clear current plate did not clear the active selection.");
+  const clearedWorkspace = await readWorkspace();
+  const clearedState = (() => {
+    const workspace = clearedWorkspace;
+    const plate = workspace.plates.find((item) => item.id === workspace.activePlateId);
+    return {
+      plateSize: plate.plateSize,
+      allWellMapsEmpty: Object.values(plate.plates).every((wellMap) => Object.keys(wellMap).length === 0),
+      dimensionIds: plate.dimensions.map((dimension) => dimension.id),
+      calculationLog: plate.calculationLog,
+      calculationOutputs: plate.calculationOutputs,
+      liquidPlan: plate.liquidPlans[0],
+    };
+  })();
+  if (clearedState.plateSize !== 24 || !clearedState.allWellMapsEmpty) throw new Error(`Clear did not preserve the format or empty all physical-plate maps: ${JSON.stringify(clearedState)}`);
+  if (clearedState.dimensionIds.includes("calculated") || clearedState.calculationLog.length || clearedState.calculationOutputs.length) throw new Error("Clear did not remove generated calculation state.");
+  if (!clearedState.liquidPlan?.stale || clearedState.liquidPlan?.status !== "stale") throw new Error("Clear did not mark the saved liquid plan stale.");
   await page.locator("#undoButton").click();
   const restoredLines = await page.locator('[data-well="A1"] .well-primary, [data-well="A1"] .well-secondary, [data-well="A1"] .well-tertiary').allInnerTexts();
   if (restoredLines.join("|") !== "Sample-A|Drug A|2") throw new Error("Undo did not restore the cleared plate layout.");
+  const restoredWorkspace = await readWorkspace();
+  const restoredState = (() => {
+    const workspace = restoredWorkspace;
+    const plate = workspace.plates.find((item) => item.id === workspace.activePlateId);
+    return {
+      hiddenValue: plate.plates[6].A1?.params?.sample,
+      calculated: plate.plates[24].A1?.params?.calculated,
+      calculationOutputs: plate.calculationOutputs,
+      liquidPlan: plate.liquidPlans[0],
+    };
+  })();
+  if (restoredState.hiddenValue !== "Stored-six-well-value" || restoredState.calculated !== 8 || restoredState.calculationOutputs.length !== 1 || restoredState.liquidPlan?.stale) throw new Error(`Undo did not restore the complete physical-plate state: ${JSON.stringify(restoredState)}`);
+  await page.locator("#clearPlateLayoutButton").click();
+  await page.locator("#clearPlateLayoutButton").click();
+  await page.keyboard.press(process.platform === "darwin" ? "Meta+z" : "Control+z");
+  if (!(await page.locator('[data-well="A1"]').innerText()).includes("Sample-A")) throw new Error("Keyboard undo did not restore the cleared plate layout.");
 
   for (const size of [6, 12, 24, 96, 384]) {
     await page.locator(`.plate-option[data-size="${size}"]`).click();

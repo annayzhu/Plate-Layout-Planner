@@ -44,8 +44,12 @@
     const base = String(requestedName ?? "").trim().slice(0, 80) || "Untitled plate";
     if (!plateNameConflict(workspace, base)) return base;
     let suffix = 2;
-    while (plateNameConflict(workspace, `${base} ${suffix}`)) suffix += 1;
-    return `${base} ${suffix}`.slice(0, 80);
+    while (true) {
+      const ending = ` ${suffix}`;
+      const candidate = `${base.slice(0, 80 - ending.length)}${ending}`;
+      if (!plateNameConflict(workspace, candidate)) return candidate;
+      suffix += 1;
+    }
   }
 
   function normalizeDimensions(source) {
@@ -98,7 +102,9 @@
     const size = PLATE_SIZES.includes(Number(plateSize)) ? Number(plateSize) : 24;
     const normalizedDimensions = normalizeDimensions(dimensions);
     const maps = blankPlateMaps();
-    maps[size] = normalizeWellMap(wells?.[size] || wells);
+    const hasPlateMaps = wells && typeof wells === "object" && PLATE_SIZES.some((candidateSize) => wells[candidateSize] && typeof wells[candidateSize] === "object");
+    if (hasPlateMaps) PLATE_SIZES.forEach((candidateSize) => { maps[candidateSize] = normalizeWellMap(wells[candidateSize]); });
+    else maps[size] = normalizeWellMap(wells);
     const planState = normalizeLiquidPlanState({ liquidPlan, liquidPlans, archivedLiquidPlans });
     return {
       id: typeof id === "string" && id ? id : newId(),
@@ -162,7 +168,7 @@
       const normalized = createPlate({
         ...plate,
         id: typeof plate?.id === "string" && plate.id && !seen.has(plate.id) ? plate.id : `plate-${index + 1}-${newId("id")}`,
-        wells: plate?.plates?.[plate?.plateSize] || plate?.wells,
+        wells: plate?.plates || plate?.wells,
       });
       seen.add(normalized.id);
       return normalized;

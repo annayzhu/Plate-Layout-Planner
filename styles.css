@@ -221,7 +221,7 @@ button:focus-visible, .file-button:focus-within, .well:focus-visible {
 .plate-card-heading { display: grid; gap: 9px; margin-bottom: 9px; }
 .plate-heading-copy { display: grid; gap: 6px; }
 .plate-title-line { display: flex; align-items: center; justify-content: space-between; gap: 13px; }
-.plate-name-field { position: relative; flex: 0 1 210px; min-width: 120px; }
+.plate-name-field { position: relative; display: grid; flex: 0 1 210px; min-width: 120px; }
 .plate-name-editor {
   min-height: 42px;
   padding: 4px 8px;
@@ -238,7 +238,12 @@ button:focus-visible, .file-button:focus-within, .well:focus-visible {
 }
 .plate-name-editor:hover { border-bottom-color: var(--pine); border-bottom-style: solid; background: var(--surface-soft); }
 .plate-name-editor:focus { border-color: var(--pine); border-style: solid; border-radius: 8px; background: var(--surface-strong); }
+.plate-name-editor[aria-invalid="true"] { border-color: var(--danger); background: var(--danger-soft); }
+.plate-name-error { margin-top: 3px; padding-inline: 8px; color: var(--danger); font-size: var(--type-meta); font-weight: 720; line-height: 1.35; }
 .history-actions { display: inline-flex; align-items: center; gap: 4px; }
+.plate-reset-button { min-height: 31px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 8px; background: transparent; color: var(--danger); font-size: var(--type-meta); font-weight: 760; white-space: nowrap; }
+.plate-reset-button:hover { border-color: var(--danger); background: var(--danger-soft); }
+.plate-reset-button.confirming { border-color: var(--danger); background: var(--danger); color: #fff; }
 .history-button {
   display: grid;
   width: 31px;

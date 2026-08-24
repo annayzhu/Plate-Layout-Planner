@@ -46,6 +46,65 @@ test("supports two independent plates with the same format", () => {
   assert.notEqual(workspace.plates[0].id, workspace.plates[1].id);
 });
 
+test("compares plate names after trimming, unicode normalization, and case folding", () => {
+  let workspace = Workspace.createWorkspace({ name: "Naming", plateName: "Plate A", plateSize: 24 });
+  workspace = Workspace.addPlate(workspace, { name: "Plate B", plateSize: 24 });
+
+  assert.equal(Workspace.normalizePlateName("  PLATE A  "), "plate a");
+  assert.equal(Workspace.plateNameConflict(workspace, " plate a ", workspace.plates[1].id)?.id, workspace.plates[0].id);
+  assert.equal(Workspace.plateNameConflict(workspace, "Plate B", workspace.plates[1].id), null);
+  assert.equal(Workspace.plateNameConflict(workspace, "Plate C", workspace.plates[1].id), null);
+});
+
+test("generates a unique bounded copy name even when the source name is 80 characters", () => {
+  const longName = "A".repeat(80);
+  let workspace = Workspace.createWorkspace({ plateName: longName, plateSize: 24 });
+  workspace = Workspace.duplicatePlate(workspace, workspace.plates[0].id, "structure");
+  const copy = Workspace.activePlate(workspace);
+  assert.equal(copy.name.length <= 80, true);
+  assert.notEqual(Workspace.normalizePlateName(copy.name), Workspace.normalizePlateName(longName));
+  assert.equal(Workspace.plateNameConflict(workspace, copy.name, copy.id), null);
+});
+
+test("normalization preserves well maps from every format of a physical plate", () => {
+  const workspace = Workspace.createWorkspace({ plateName: "Multi-format", plateSize: 96 });
+  workspace.plates[0].plates[96].A1 = { params: { sample: "visible" } };
+  workspace.plates[0].plates[24].B2 = { params: { sample: "stored" } };
+
+  const restored = Workspace.normalizeWorkspace(JSON.parse(JSON.stringify(workspace)));
+  assert.equal(restored.plates[0].plates[96].A1.params.sample, "visible");
+  assert.equal(restored.plates[0].plates[24].B2.params.sample, "stored");
+});
+
+test("clears a physical plate layout while preserving structure and making its plan stale", () => {
+  const plate = Workspace.createPlate({
+    id: "p1",
+    name: "A549-1",
+    plateSize: 96,
+    dimensions: [
+      { id: "sample", name: "样本", type: "text" },
+      { id: "calculated", name: "计算结果", type: "number", unit: "µL" },
+    ],
+    wells: { A1: { params: { sample: "Mock", calculated: 4 } } },
+    calculationLog: [{ outputId: "calculated" }],
+    calculationOutputs: [{ id: "calculated", sourceId: "sample" }],
+    liquidPlans: [{ id: "plan-1", status: "saved", stale: false }],
+  });
+  plate.plates[24].B2 = { params: { sample: "hidden-layout" } };
+
+  const cleared = Workspace.clearPlateLayout(plate);
+
+  assert.equal(cleared.name, "A549-1");
+  assert.equal(cleared.plateSize, 96);
+  assert.deepEqual(cleared.dimensions.map((dimension) => dimension.id), ["sample"]);
+  assert.deepEqual(cleared.plates, { 6: {}, 12: {}, 24: {}, 96: {}, 384: {} });
+  assert.deepEqual(cleared.calculationLog, []);
+  assert.deepEqual(cleared.calculationOutputs, []);
+  assert.equal(Workspace.currentLiquidPlan(cleared).stale, true);
+  assert.equal(Workspace.currentLiquidPlan(cleared).status, "stale");
+  assert.equal(plate.plates[96].A1.params.sample, "Mock");
+});
+
 test("normalizes legacy duplicate liquid plans to one current plan and an inert archive", () => {
   const workspace = Workspace.normalizeWorkspace({
     version: 2,

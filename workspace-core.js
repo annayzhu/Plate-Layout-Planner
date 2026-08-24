@@ -30,6 +30,28 @@
     return { 6: {}, 12: {}, 24: {}, 96: {}, 384: {} };
   }
 
+  function normalizePlateName(value) {
+    return String(value ?? "").normalize("NFKC").trim().toLocaleLowerCase();
+  }
+
+  function plateNameConflict(workspace, candidate, excludePlateId = "") {
+    const normalizedCandidate = normalizePlateName(candidate);
+    if (!normalizedCandidate) return null;
+    return (workspace?.plates || []).find((plate) => plate.id !== excludePlateId && normalizePlateName(plate.name) === normalizedCandidate) || null;
+  }
+
+  function uniquePlateName(workspace, requestedName) {
+    const base = String(requestedName ?? "").trim().slice(0, 80) || "Untitled plate";
+    if (!plateNameConflict(workspace, base)) return base;
+    let suffix = 2;
+    while (true) {
+      const ending = ` ${suffix}`;
+      const candidate = `${base.slice(0, 80 - ending.length)}${ending}`;
+      if (!plateNameConflict(workspace, candidate)) return candidate;
+      suffix += 1;
+    }
+  }
+
   function normalizeDimensions(source) {
     const seen = new Set();
     const rows = Array.isArray(source) ? source : DEFAULT_DIMENSIONS;
@@ -80,7 +102,9 @@
     const size = PLATE_SIZES.includes(Number(plateSize)) ? Number(plateSize) : 24;
     const normalizedDimensions = normalizeDimensions(dimensions);
     const maps = blankPlateMaps();
-    maps[size] = normalizeWellMap(wells?.[size] || wells);
+    const hasPlateMaps = wells && typeof wells === "object" && PLATE_SIZES.some((candidateSize) => wells[candidateSize] && typeof wells[candidateSize] === "object");
+    if (hasPlateMaps) PLATE_SIZES.forEach((candidateSize) => { maps[candidateSize] = normalizeWellMap(wells[candidateSize]); });
+    else maps[size] = normalizeWellMap(wells);
     const planState = normalizeLiquidPlanState({ liquidPlan, liquidPlans, archivedLiquidPlans });
     return {
       id: typeof id === "string" && id ? id : newId(),
@@ -144,7 +168,7 @@
       const normalized = createPlate({
         ...plate,
         id: typeof plate?.id === "string" && plate.id && !seen.has(plate.id) ? plate.id : `plate-${index + 1}-${newId("id")}`,
-        wells: plate?.plates?.[plate?.plateSize] || plate?.wells,
+        wells: plate?.plates || plate?.wells,
       });
       seen.add(normalized.id);
       return normalized;
@@ -201,6 +225,17 @@
     return next;
   }
 
+  function clearPlateLayout(plate) {
+    const next = markLiquidPlanStale(plate);
+    const calculatedDimensionIds = new Set((next.calculationOutputs || []).map((output) => output?.id).filter(Boolean));
+    next.plates = blankPlateMaps();
+    next.dimensions = (next.dimensions || []).filter((dimension) => !calculatedDimensionIds.has(dimension.id));
+    next.calculationLog = [];
+    next.calculationOutputs = [];
+    next.updatedAt = new Date().toISOString();
+    return next;
+  }
+
   function activePlate(workspace) {
     return workspace.plates.find((plate) => plate.id === workspace.activePlateId) || workspace.plates[0];
   }
@@ -208,7 +243,7 @@
   function addPlate(workspace, options = {}) {
     const next = normalizeWorkspace(workspace);
     if (next.plates.length >= 24) throw new Error("A workspace supports at most 24 plates.");
-    const plate = createPlate(options);
+    const plate = createPlate({ ...options, name: uniquePlateName(next, options.name) });
     next.plates.push(plate);
     next.activePlateId = plate.id;
     next.updatedAt = new Date().toISOString();
@@ -222,7 +257,7 @@
     if (!source) throw new Error("Source plate was not found.");
     const copiedWells = mode === "structure" ? {} : source.plates[source.plateSize];
     const plate = createPlate({
-      name: `${source.name} 副本`,
+      name: uniquePlateName(next, `${source.name} 副本`),
       plateSize: source.plateSize,
       dimensions: source.dimensions,
       wells: copiedWells,
@@ -343,5 +378,5 @@
     };
   }
 
-  return { PLATE_SIZES, createPlate, createWorkspace, normalizeWorkspace, activePlate, addPlate, duplicatePlate, reorderPlate, removePlate, currentLiquidPlan, usableLiquidPlan, publishLiquidPlan, markLiquidPlanStale, clearLiquidPlan, mergeLiquidContributions };
+  return { PLATE_SIZES, createPlate, createWorkspace, normalizeWorkspace, activePlate, addPlate, duplicatePlate, reorderPlate, removePlate, normalizePlateName, plateNameConflict, uniquePlateName, currentLiquidPlan, usableLiquidPlan, publishLiquidPlan, markLiquidPlanStale, clearLiquidPlan, clearPlateLayout, mergeLiquidContributions };
 });

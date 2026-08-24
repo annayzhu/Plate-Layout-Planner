@@ -8,6 +8,19 @@ export async function plateLayoutJourney({ page, outputDirectory }) {
   await page.locator("#projectName").press("Enter");
   if (!(await page.locator(".plate-tab.active").innerText()).includes("Isolated plate journey")) throw new Error("Enter did not update the active plate tab.");
 
+  await page.locator("#addPlateButton").click();
+  await page.locator("#projectName").fill("Control Plate");
+  await page.locator("#projectName").press("Enter");
+  await page.locator(".plate-tab").first().click();
+  await page.locator("#projectName").fill("  control plate  ");
+  await page.locator("#projectName").press("Enter");
+  if (!(await page.locator("#plateNameError").isVisible())) throw new Error("Duplicate plate name did not show an inline warning.");
+  if ((await page.locator(".plate-tab.active span").innerText()).trim() !== "Isolated plate journey") throw new Error("Duplicate plate name replaced the committed tab label.");
+  if ((await page.locator("#projectName").getAttribute("aria-invalid")) !== "true") throw new Error("Duplicate plate name was not exposed as invalid to assistive technology.");
+  await page.locator("#projectName").fill("Treatment Plate");
+  await page.locator("#projectName").press("Enter");
+  if (await page.locator("#plateNameError").isVisible()) throw new Error("Plate-name warning remained after entering a unique name.");
+
   await page.locator('[data-well="A1"]').click();
   await page.locator('[data-well="B2"]').click();
   if ((await page.locator("#selectionCount").innerText()) !== "已选 1 孔") throw new Error("Plain click did not replace the selection.");
@@ -25,6 +38,15 @@ export async function plateLayoutJourney({ page, outputDirectory }) {
   await page.locator("#applyParametersButton").click();
   const lines = await page.locator('[data-well="A1"] .well-primary, [data-well="A1"] .well-secondary, [data-well="A1"] .well-tertiary').allInnerTexts();
   if (lines.join("|") !== "Sample-A|Drug A|2") throw new Error(`The first three dimensions were not rendered together: ${lines.join("|")}`);
+
+  await page.locator("#clearPlateLayoutButton").click();
+  await page.locator("#clearPlateLayoutButton").click();
+  if ((await page.locator('[data-well="A1"]').innerText()).includes("Sample-A")) throw new Error("Clear current plate did not remove assigned well values.");
+  if ((await page.locator("#projectName").inputValue()) !== "Treatment Plate") throw new Error("Clear current plate changed the plate name.");
+  if (await page.locator(".dimension-row").count() < 6) throw new Error("Clear current plate removed user parameter dimensions.");
+  await page.locator("#undoButton").click();
+  const restoredLines = await page.locator('[data-well="A1"] .well-primary, [data-well="A1"] .well-secondary, [data-well="A1"] .well-tertiary').allInnerTexts();
+  if (restoredLines.join("|") !== "Sample-A|Drug A|2") throw new Error("Undo did not restore the cleared plate layout.");
 
   for (const size of [6, 12, 24, 96, 384]) {
     await page.locator(`.plate-option[data-size="${size}"]`).click();

@@ -82,7 +82,7 @@
   ];
   const elements = Object.fromEntries(
     [
-      "projectName", "saveStatus", "undoButton", "redoButton", "selectionCount",
+      "projectName", "plateNameError", "clearPlateLayoutButton", "saveStatus", "undoButton", "redoButton", "selectionCount",
       "selectAllButton", "invertSelectionButton", "clearSelectionButton", "clearWellsButton",
       "colorDimension", "plateCanvas", "plateGrid", "selectionBox", "plateLegend", "wellDisplayNote",
       "dimensionCount", "addDimensionForm", "newDimensionName", "newDimensionType", "dimensionList",
@@ -121,6 +121,7 @@
   let calculationDeleteTimer = null;
   let pendingCalculationDeleteId = null;
   let plateDeleteTimer = null;
+  let plateLayoutClearTimer = null;
   let overviewOpen = false;
   let overviewColorName = "";
   let indexedSaveTimer = null;
@@ -155,6 +156,8 @@
     elements.confirmRestoreButton.textContent = bilingual("确认替换当前项目", "Confirm project replacement");
     elements.undoButton.title = language === "en" ? "Undo (Ctrl/⌘ Z)" : "撤销（Ctrl/⌘ Z）";
     elements.redoButton.title = language === "en" ? "Redo (Ctrl/⌘ Shift Z)" : "重做（Ctrl/⌘ Shift Z）";
+    elements.clearPlateLayoutButton.title = bilingual("清空当前物理板的全部孔位、计算结果和草稿", "Clear all wells, calculation results, and drafts on this physical plate");
+    if (!elements.clearPlateLayoutButton.classList.contains("confirming")) elements.clearPlateLayoutButton.textContent = bilingual("清空布局", "Clear layout");
     document.querySelectorAll(".plate-option").forEach((button) => { button.textContent = `${button.dataset.size} ${t("plate")}`; });
     document.querySelectorAll(".collapse-toggle").forEach((toggle) => {
       toggle.dataset.openLabel = t("collapse");
@@ -1852,8 +1855,25 @@
     elements.clearWellsButton.removeAttribute("aria-live");
   }
 
+  function setPlateNameError(message = "") {
+    elements.plateNameError.textContent = message;
+    elements.plateNameError.hidden = !message;
+    if (message) elements.projectName.setAttribute("aria-invalid", "true");
+    else elements.projectName.removeAttribute("aria-invalid");
+  }
+
+  function resetPlateLayoutClearConfirmation() {
+    window.clearTimeout(plateLayoutClearTimer);
+    plateLayoutClearTimer = null;
+    elements.clearPlateLayoutButton.classList.remove("confirming");
+    elements.clearPlateLayoutButton.textContent = bilingual("清空布局", "Clear layout");
+    elements.clearPlateLayoutButton.removeAttribute("aria-live");
+  }
+
   function renderAll() {
     colorRegistryCache = new Map();
+    resetPlateLayoutClearConfirmation();
+    setPlateNameError();
     applyLanguage();
     renderWorkspaceChrome();
     elements.projectName.value = project.name;
@@ -2035,19 +2055,47 @@
   });
 
   elements.projectName.addEventListener("input", () => {
-    project.name = elements.projectName.value.slice(0, 80);
-    saveProject();
+    const conflict = Workspace.plateNameConflict(workspace, elements.projectName.value, project.id);
+    setPlateNameError(conflict ? bilingual(`板号已被“${conflict.name}”使用，请输入唯一名称。`, `This name is already used by “${conflict.name}”. Enter a unique name.`) : "");
   });
   elements.projectName.addEventListener("keydown", (event) => {
     if (event.key === "Enter") elements.projectName.blur();
   });
   elements.projectName.addEventListener("blur", () => {
     const normalizedName = elements.projectName.value.trim() || t("defaultProject");
-    project.name = normalizedName;
-    elements.projectName.value = normalizedName;
-    saveProject();
-    const activeTabName = elements.plateTabs.querySelector(`[data-plate-id="${CSS.escape(project.id)}"] span`);
-    if (activeTabName) activeTabName.textContent = normalizedName;
+    const conflict = Workspace.plateNameConflict(workspace, normalizedName, project.id);
+    if (conflict) {
+      setPlateNameError(bilingual(`板号已被“${conflict.name}”使用，请输入唯一名称。`, `This name is already used by “${conflict.name}”. Enter a unique name.`));
+      window.queueMicrotask(() => elements.projectName.focus());
+      return;
+    }
+    setPlateNameError();
+    if (project.name === normalizedName) {
+      elements.projectName.value = normalizedName;
+      return;
+    }
+    commit(() => { project.name = normalizedName; }, { invalidateLiquid: false });
+  });
+
+  elements.clearPlateLayoutButton.addEventListener("click", () => {
+    if (!plateLayoutClearTimer) {
+      elements.clearPlateLayoutButton.classList.add("confirming");
+      elements.clearPlateLayoutButton.textContent = bilingual("再次点击确认", "Click again to confirm");
+      elements.clearPlateLayoutButton.setAttribute("aria-live", "polite");
+      plateLayoutClearTimer = window.setTimeout(resetPlateLayoutClearConfirmation, 5000);
+      return;
+    }
+    resetPlateLayoutClearConfirmation();
+    commit(() => {
+      Object.assign(project, Workspace.clearPlateLayout(project));
+      selection = new Set();
+      selectionAnchor = null;
+      pendingBatchPaste = null;
+      lastLiquidResult = null;
+      pendingDrugLayout = null;
+      pendingSerialLayout = null;
+    });
+    showToast(bilingual("当前板布局已清空，可使用撤销恢复", "Current plate layout cleared; use Undo to restore it"));
   });
 
   elements.colorDimension.addEventListener("change", () => {
@@ -2091,6 +2139,7 @@
 
   document.addEventListener("pointerdown", (event) => {
     if (clearConfirmationTimer && !event.target.closest("#clearWellsButton")) resetClearConfirmation();
+    if (plateLayoutClearTimer && !event.target.closest("#clearPlateLayoutButton")) resetPlateLayoutClearConfirmation();
     if (dimensionDeleteTimer && !event.target.closest(".dimension-delete")) resetDimensionDeleteConfirmation();
     if (importConfirmationTimer && !event.target.closest("#confirmImportButton")) resetImportConfirmation();
     if (calculationDeleteTimer && !event.target.closest('.calculation-output-delete[data-action="delete"]')) resetCalculationDeleteConfirmation();

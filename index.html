@@ -7,7 +7,7 @@
     <meta name="description" content="纯浏览器本地运行的 6、12、24、96、384 孔板布局、标签与批量计算工具。" />
     <title>Plate Layout Planner · 孔板布局规划工具</title>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230f625d'/%3E%3Cg fill='%23fff'%3E%3Ccircle cx='10' cy='10' r='3'/%3E%3Ccircle cx='22' cy='10' r='3'/%3E%3Ccircle cx='10' cy='22' r='3'/%3E%3Ccircle cx='22' cy='22' r='3'/%3E%3C/g%3E%3C/svg%3E" />
-    <link rel="stylesheet" href="styles.css?v=20260823-28" />
+    <link rel="stylesheet" href="styles.css?v=20260824-35" />
   </head>
   <body>
     <header class="topbar">
@@ -79,9 +79,11 @@
               <div class="plate-title-line">
                 <label class="plate-name-field" title="点击修改孔板名称">
                   <span class="sr-only">孔板名称</span>
-                  <input id="projectName" class="plate-name-editor" type="text" value="未命名孔板" placeholder="未命名孔板" maxlength="80" aria-label="孔板名称，点击修改" />
+                  <input id="projectName" class="plate-name-editor" type="text" value="未命名孔板" placeholder="未命名孔板" maxlength="80" aria-label="孔板名称，点击修改" aria-describedby="plateNameError" />
+                  <span id="plateNameError" class="plate-name-error" role="alert" hidden></span>
                 </label>
                 <div class="history-actions" aria-label="编辑历史">
+                  <button id="clearPlateLayoutButton" class="plate-reset-button" type="button" title="清空当前板布局">清空布局</button>
                   <button id="undoButton" class="history-button" type="button" title="撤销（Ctrl/⌘ Z）" aria-label="撤销">↶</button>
                   <button id="redoButton" class="history-button" type="button" title="重做（Ctrl/⌘ Shift Z）" aria-label="重做">↷</button>
                 </div>
@@ -334,8 +336,8 @@
     <script src="color-core.js?v=20260823-15"></script>
     <script src="liquid-core.js?v=20260823-15"></script>
     <script src="liquid-plan-core.js?v=20260823-28"></script>
-    <script src="workspace-core.js?v=20260823-28"></script>
+    <script src="workspace-core.js?v=20260824-35"></script>
     <script src="xlsx-core.js?v=20260822-1"></script>
-    <script src="app.js?v=20260823-28"></script>
+    <script src="app.js?v=20260824-35"></script>
   </body>
 </html>

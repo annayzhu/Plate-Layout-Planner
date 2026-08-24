@@ -20,6 +20,13 @@ export async function plateLayoutJourney({ page, outputDirectory, persistWorkspa
   await page.locator("#projectName").fill("Treatment Plate");
   await page.locator("#projectName").press("Enter");
   if (await page.locator("#plateNameError").isVisible()) throw new Error("Plate-name warning remained after entering a unique name.");
+  await page.locator('.language-option[data-language="en"]').click();
+  await page.locator("#projectName").fill("control plate");
+  await page.locator("#projectName").press("Enter");
+  if (!(await page.locator("#plateNameError").innerText()).includes("already used")) throw new Error("English duplicate-name warning was not rendered.");
+  await page.locator("#projectName").fill("Treatment Plate");
+  await page.locator("#projectName").press("Enter");
+  await page.locator('.language-option[data-language="zh"]').click();
 
   await page.locator('[data-well="A1"]').click();
   await page.locator('[data-well="B2"]').click();
@@ -51,6 +58,8 @@ export async function plateLayoutJourney({ page, outputDirectory, persistWorkspa
   await page.locator('[data-well="A1"]').click();
 
   await page.locator("#clearPlateLayoutButton").click();
+  if (!(await page.locator("#clearPlateLayoutButton").evaluate((button) => button.classList.contains("confirming")))) throw new Error("First clear click did not enter an in-page confirmation state.");
+  if (!(await page.locator('[data-well="A1"]').innerText()).includes("Sample-A")) throw new Error("First clear click changed data before confirmation.");
   await page.locator("#clearPlateLayoutButton").click();
   if ((await page.locator('[data-well="A1"]').innerText()).includes("Sample-A")) throw new Error("Clear current plate did not remove assigned well values.");
   if ((await page.locator("#projectName").inputValue()) !== "Treatment Plate") throw new Error("Clear current plate changed the plate name.");

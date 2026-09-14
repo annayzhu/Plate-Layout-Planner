@@ -294,6 +294,46 @@
     return next;
   }
 
+  function importPlates(workspace, incomingPlates, { mode = "add", replacePlateId = "" } = {}) {
+    const source = normalizeWorkspace(workspace);
+    const replacing = mode === "replace";
+    const replaceIndex = replacing ? source.plates.findIndex((plate) => plate.id === replacePlateId) : -1;
+    if (replacing && replaceIndex < 0) return { ok: false, error: { code: "replace-plate-not-found", replacePlateId } };
+
+    const incoming = Array.isArray(incomingPlates) ? incomingPlates : [];
+    const retained = source.plates.filter((_, index) => index !== replaceIndex);
+    const availableCount = 24 - retained.length;
+    if (!incoming.length) return { ok: false, error: { code: "no-plates-to-import", incomingCount: 0, availableCount, maximumCount: 24 } };
+    if (incoming.length > availableCount) {
+      return { ok: false, error: { code: "plate-capacity-exceeded", incomingCount: incoming.length, availableCount, maximumCount: 24 } };
+    }
+
+    const nameWorkspace = { plates: [...retained] };
+    const renamed = [];
+    const prepared = incoming.map((plate, index) => {
+      const normalized = createPlate({ ...plate, id: undefined, wells: plate?.plates || plate?.wells });
+      const originalName = normalized.name;
+      normalized.name = uniquePlateName(nameWorkspace, originalName);
+      if (normalized.name !== originalName) renamed.push({ index, from: originalName, to: normalized.name });
+      nameWorkspace.plates.push(normalized);
+      return normalized;
+    });
+
+    if (replacing) {
+      prepared[0].id = replacePlateId;
+      source.plates.splice(replaceIndex, 1, ...prepared);
+    } else source.plates.push(...prepared);
+    source.activePlateId = prepared[0].id;
+    source.latestLiquidSummary = null;
+    source.updatedAt = new Date().toISOString();
+    return { ok: true, workspace: source, plates: prepared, renamed };
+  }
+
+  function resolveSummaryPlates(workspace, plateIds) {
+    const selectedIds = new Set(Array.isArray(plateIds) ? plateIds : []);
+    return (workspace?.plates || []).filter((plate) => selectedIds.has(plate.id));
+  }
+
   const VOLUME_TO_UL = Object.freeze({ nL: 0.001, "µL": 1, uL: 1, mL: 1000, L: 1000000 });
   function mergeLiquidContributions(contributions, { overagePercent = 0, minPipetteVolume = 1, maxContainerVolume = Infinity } = {}) {
     const groups = new Map();
@@ -378,5 +418,5 @@
     };
   }
 
-  return { PLATE_SIZES, createPlate, createWorkspace, normalizeWorkspace, activePlate, addPlate, duplicatePlate, reorderPlate, removePlate, normalizePlateName, plateNameConflict, uniquePlateName, currentLiquidPlan, usableLiquidPlan, publishLiquidPlan, markLiquidPlanStale, clearLiquidPlan, clearPlateLayout, mergeLiquidContributions };
+  return { PLATE_SIZES, createPlate, createWorkspace, normalizeWorkspace, activePlate, addPlate, duplicatePlate, reorderPlate, removePlate, importPlates, resolveSummaryPlates, normalizePlateName, plateNameConflict, uniquePlateName, currentLiquidPlan, usableLiquidPlan, publishLiquidPlan, markLiquidPlanStale, clearLiquidPlan, clearPlateLayout, mergeLiquidContributions };
 });

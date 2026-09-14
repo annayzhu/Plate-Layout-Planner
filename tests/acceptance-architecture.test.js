@@ -9,6 +9,7 @@ test("acceptance registry exposes independently runnable domain journeys", async
     "liquid-plan-lifecycle",
     "issue-28-merge",
     "issue-28-split",
+    "issue-38-plate-zoom",
   ]);
   for (const name of Object.keys(JOURNEYS).filter((item) => item !== "comprehensive")) assert.equal(typeof JOURNEYS[name], "function");
 });
@@ -24,4 +25,13 @@ test("issue 28 fixture is deterministic and isolates compatible versus incompati
   const split = issue28Workspace({ changedPlate: 4, changedTreatment: "NC-FAM" });
   const splitKeys = split.plates.map((plate) => plate.liquidPlans[0].contributions.find((row) => row.cargoIdentity === "NC-FAM")?.groupKey);
   assert.equal(new Set(splitKeys).size, 2);
+});
+
+test("acceptance CSV reader parses quoted commas, quotes, and line breaks", async () => {
+  const { parseCsv } = await import("../scripts/acceptance/harness.mjs");
+  assert.deepEqual(parseCsv('\uFEFFname,note\r\nA549,"one,two"\r\nMock,"line 1\nline ""2"""'), [
+    ["name", "note"],
+    ["A549", "one,two"],
+    ["Mock", 'line 1\nline "2"'],
+  ]);
 });

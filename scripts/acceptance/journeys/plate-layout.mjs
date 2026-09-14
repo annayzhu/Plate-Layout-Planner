@@ -2,7 +2,7 @@ import { resolve } from "node:path";
 
 export async function plateLayoutJourney({ page, outputDirectory, persistWorkspace, readWorkspace }) {
   if (await page.locator(".well").count() !== 24) throw new Error("Initial 24-well plate did not render.");
-  if (await page.locator("#plateCanvas > .plate-interaction-help").count() !== 1) throw new Error("Selection guidance is not inside the plate canvas.");
+  if (await page.locator("#plateCanvas > .plate-view-head .plate-interaction-help").count() !== 1) throw new Error("Selection guidance is not inside the plate canvas.");
 
   await page.locator("#projectName").fill("Isolated plate journey");
   await page.locator("#projectName").press("Enter");

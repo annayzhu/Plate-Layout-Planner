@@ -196,6 +196,69 @@ test("reorders plates and refuses to remove the final plate", () => {
   assert.throws(() => Workspace.removePlate(workspace, workspace.plates[0].id), /at least one plate/i);
 });
 
+test("plate import rejects capacity overflow atomically with actionable counts", () => {
+  let workspace = Workspace.createWorkspace({ plateName: "Existing", plateSize: 24 });
+  for (let index = 2; index <= 23; index += 1) workspace = Workspace.addPlate(workspace, { name: `Plate ${index}`, plateSize: 24 });
+  const before = JSON.stringify(workspace);
+  const result = Workspace.importPlates(workspace, [
+    Workspace.createPlate({ name: "Incoming 1" }),
+    Workspace.createPlate({ name: "Incoming 2" }),
+  ], { mode: "add" });
+
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.error, { code: "plate-capacity-exceeded", incomingCount: 2, availableCount: 1, maximumCount: 24 });
+  assert.equal(JSON.stringify(workspace), before);
+});
+
+test("plate import resolves duplicate names before mutation and reports every rename", () => {
+  const workspace = Workspace.createWorkspace({ plateName: "A549", plateSize: 24 });
+  const result = Workspace.importPlates(workspace, [
+    Workspace.createPlate({ name: " A549 " }),
+    Workspace.createPlate({ name: "a549" }),
+  ], { mode: "add" });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.workspace.plates.map((plate) => plate.name), ["A549", "A549 2", "a549 3"]);
+  assert.deepEqual(result.renamed, [
+    { index: 0, from: "A549", to: "A549 2" },
+    { index: 1, from: "a549", to: "a549 3" },
+  ]);
+  assert.equal(workspace.plates.length, 1);
+});
+
+test("replace import preserves the current plate position and identity", () => {
+  let workspace = Workspace.createWorkspace({ plateName: "First", plateSize: 24 });
+  workspace = Workspace.addPlate(workspace, { name: "Second", plateSize: 96 });
+  const replacedId = workspace.activePlateId;
+  const result = Workspace.importPlates(workspace, [Workspace.createPlate({ name: "Replacement", plateSize: 384 })], {
+    mode: "replace",
+    replacePlateId: replacedId,
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.workspace.plates[1].id, replacedId);
+  assert.equal(result.workspace.plates[1].name, "Replacement");
+  assert.equal(result.workspace.plates[1].plateSize, 384);
+  assert.equal(result.workspace.activePlateId, replacedId);
+});
+
+test("summary plate resolution always follows current identities and workspace order", () => {
+  let workspace = Workspace.createWorkspace({ plateName: "First", plateSize: 24 });
+  workspace = Workspace.addPlate(workspace, { name: "Second", plateSize: 24 });
+  workspace = Workspace.addPlate(workspace, { name: "Third", plateSize: 24 });
+  const [first, second, third] = workspace.plates;
+  const summaryPlateIds = [first.id, second.id, third.id];
+
+  workspace.plates[0].name = "First renamed";
+  workspace = Workspace.removePlate(workspace, second.id);
+  workspace = Workspace.reorderPlate(workspace, third.id, -1);
+
+  assert.deepEqual(
+    Workspace.resolveSummaryPlates(workspace, summaryPlateIds).map((plate) => [plate.id, plate.name]),
+    [[third.id, "Third"], [first.id, "First renamed"]],
+  );
+});
+
 test("merges compatible liquid requirements before applying overage once", () => {
   const result = Workspace.mergeLiquidContributions([
     { plateId: "p1", plateName: "Plate 1", groupKey: "mix-a", component: "Medium", baseVolume: 100, unit: "µL" },

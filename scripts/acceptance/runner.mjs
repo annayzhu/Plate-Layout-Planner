@@ -4,6 +4,7 @@ import { runComprehensiveRegression } from "./journeys/comprehensive-regression.
 import { issue28MergeJourney, issue28SplitJourney } from "./journeys/issue-28.mjs";
 import { liquidPlanLifecycleJourney } from "./journeys/liquid-plan-lifecycle.mjs";
 import { plateLayoutJourney } from "./journeys/plate-layout.mjs";
+import { issue38PlateZoomJourney } from "./journeys/issue-38.mjs";
 
 export const JOURNEYS = Object.freeze({
   comprehensive: null,
@@ -11,6 +12,7 @@ export const JOURNEYS = Object.freeze({
   "liquid-plan-lifecycle": liquidPlanLifecycleJourney,
   "issue-28-merge": issue28MergeJourney,
   "issue-28-split": issue28SplitJourney,
+  "issue-38-plate-zoom": issue38PlateZoomJourney,
 });
 
 function requestedJourneys() {

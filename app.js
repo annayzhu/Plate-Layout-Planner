@@ -28,7 +28,7 @@
   const I18N = {
     zh: {
       heroTitle: "自由板布局", heroBody: "点选、框选或 Shift 连选孔位，叠加参数维度并批量计算；数据仅保存在本机。",
-      selectionHelp: "单击单选，Ctrl/⌘ 单击逐个增减，拖动框选，Shift 单击连选；单击空白处取消选择。", selectAll: "全选", invert: "反选", deselect: "取消选择", clearWells: "清空所选孔",
+      selectionHelp: "单击单选，Ctrl/⌘ 单击逐个增减，拖动框选，Shift 单击连选；单击空白处取消选择。滚轮缩放视图。", selectAll: "全选", invert: "反选", deselect: "取消选择", clearWells: "清空所选孔",
       colorBy: "按参数着色", backup: "备份项目", excelTemplate: "当前板 CSV 模板", import: "导入孔板表格", confirmImport: "确认导入", confirmDelete: "确认删除", print: "打印 / PDF", dimensionsTitle: "参数维度", dimensionsBody: "定义实验标签，再应用到当前选择。",
       newDimension: "新维度名称", newDimensionPlaceholder: "例如：细胞系、药物、批次", type: "类型", add: "＋ 添加", assignTitle: "为所选孔赋值",
       assignBody: "可输入单个值，也可直接粘贴 Excel 多个值；只应用已勾选项。", applySelected: "应用到所选孔", clearChecked: "清除勾选参数",
@@ -47,7 +47,7 @@
     },
     en: {
       heroTitle: "Free Plate Layout", heroBody: "Select wells, add parameter dimensions, and run batch calculations. All data stays in this browser.",
-      selectionHelp: "Click for a single well, Ctrl/⌘-click to add or remove wells, drag to box-select, or Shift-click for a range. Click empty space to deselect.", selectAll: "All", invert: "Invert", deselect: "Deselect", clearWells: "Clear wells",
+      selectionHelp: "Click for one well, Ctrl/⌘-click to add or remove, drag to box-select, or Shift-click for a range. Click empty space to deselect; scroll to zoom.", selectAll: "All", invert: "Invert", deselect: "Deselect", clearWells: "Clear wells",
       colorBy: "Color by parameter", backup: "Back up project", excelTemplate: "Current plate CSV template", import: "Import plate tables", confirmImport: "Confirm import", confirmDelete: "Confirm delete", print: "Print / PDF", dimensionsTitle: "Parameters", dimensionsBody: "Define experimental labels and apply them to selected wells.",
       newDimension: "New parameter", newDimensionPlaceholder: "e.g. Cell line, drug, batch", type: "Type", add: "+ Add", assignTitle: "Assign selected wells",
       assignBody: "Enter one value or paste multiple values from Excel. Only checked parameters are applied.", applySelected: "Apply to wells", clearChecked: "Clear checked",
@@ -84,7 +84,7 @@
     [
       "projectName", "plateNameError", "clearPlateLayoutButton", "saveStatus", "undoButton", "redoButton", "selectionCount",
       "selectAllButton", "invertSelectionButton", "clearSelectionButton", "clearWellsButton",
-      "colorDimension", "plateCanvas", "plateGrid", "selectionBox", "plateLegend", "wellDisplayNote",
+      "colorDimension", "plateCanvas", "plateGrid", "plateZoomIndicator", "selectionBox", "plateLegend", "wellDisplayNote",
       "dimensionCount", "addDimensionForm", "newDimensionName", "newDimensionType", "dimensionList",
       "selectedWellSummary", "editorSelectionCount", "selectionEditor", "applyParametersButton", "clearParametersButton",
       "calcScope", "calcConditionDimension", "calcConditionValue", "conditionValueSuggestions",
@@ -106,6 +106,7 @@
   let workspaceUndoStack = [];
   let workspaceRedoStack = [];
   let pointerSession = null;
+  let plateZoom = 1;
   let toastTimer = null;
   let colorRegistryCache = new Map();
   let editingLiquidPlanId = null;
@@ -402,7 +403,7 @@
     project = restored;
   }
 
-  function commit(mutator, { invalidateLiquid = true } = {}) {
+  function commitChange(mutator, invalidateLiquid) {
     const history = historyFor();
     history.undo.push(snapshot());
     if (history.undo.length > MAX_HISTORY) history.undo.shift();
@@ -415,6 +416,10 @@
     saveProject();
     renderAll();
   }
+
+  function commit(mutator) { commitChange(mutator, true); }
+  function commitNonScientific(mutator) { commitChange(mutator, false); }
+  function commitLiquidPlanChange(mutator) { commitChange(mutator, false); }
 
   function undo() {
     const history = historyFor();
@@ -535,11 +540,19 @@
       : value;
   }
 
+  function updatePlateZoomDisplay() {
+    const percent = Math.round(plateZoom * 100);
+    elements.plateGrid.style.zoom = String(plateZoom);
+    elements.plateZoomIndicator.textContent = `${percent}%`;
+    elements.plateZoomIndicator.setAttribute("aria-label", bilingual(`孔板视图缩放 ${percent}%`, `Plate view zoom ${percent}%`));
+  }
+
   function renderPlate() {
     const spec = Core.getSpec(project.plateSize);
     const wells = currentWells();
     const colorDimension = project.colorDimension;
     elements.plateGrid.dataset.size = String(project.plateSize);
+    updatePlateZoomDisplay();
     elements.plateGrid.style.setProperty("--plate-columns", String(spec.columns));
     elements.wellDisplayNote.textContent = t(project.plateSize === 384 ? "note384" : project.plateSize === 96 ? "note96" : "noteDefault");
 
@@ -873,7 +886,8 @@
     const item = project.calculationOutputs.find((candidate) => candidate.id === outputId);
     if (!item) return;
     if (project.plateSize !== item.plateSize || project.colorDimension !== outputId) {
-      commit(() => {
+      const changesPlateScope = project.plateSize !== item.plateSize;
+      (changesPlateScope ? commit : commitNonScientific)(() => {
         project.plateSize = item.plateSize;
         project.colorDimension = outputId;
       });
@@ -1395,6 +1409,28 @@
     return warnings;
   }
 
+  function currentLiquidSummary() {
+    const stored = workspace.latestLiquidSummary;
+    if (!stored || !Array.isArray(stored.plateIds)) return stored || null;
+    const plates = Workspace.resolveSummaryPlates(workspace, stored.plateIds);
+    if (!plates.length) return null;
+    const maxContainerVolume = Number.isFinite(Number(stored.maxContainerVolume)) && Number(stored.maxContainerVolume) > 0
+      ? Number(stored.maxContainerVolume)
+      : Infinity;
+    const { merged, skipped } = aggregateLiquidPlans(plates, stored.overagePercent, maxContainerVolume);
+    const executionPlan = buildOperatorExecutionPlan(merged.groups);
+    return {
+      ...stored,
+      executionPlanVersion: LiquidPlan.EXECUTION_PLAN_VERSION,
+      plateIds: plates.map((plate) => plate.id),
+      plateNames: plates.map((plate) => plate.name),
+      groups: merged.groups,
+      executionPlan,
+      compatibilityWarnings: compatibilitySplitWarnings(merged.groups),
+      skipped,
+    };
+  }
+
   function renderProjectLiquidSummary(summary) {
     if (!summary) { elements.projectLiquidSummary.innerHTML = ""; return; }
     const plan = summary.executionPlan;
@@ -1425,7 +1461,7 @@
   }
 
   function openSummaryDrawer() {
-    const summary = workspace.latestLiquidSummary;
+    const summary = currentLiquidSummary();
     if (!summary?.executionPlan?.preparations?.length) return;
     elements.summaryDrawerMeta.textContent = bilingual(`${summary.plateNames.length} 块板 · ${summary.executionPlan.preparations.length} 项配制 · ${summary.executionPlan.steps.length} 个执行步骤`, `${summary.plateNames.length} plates · ${summary.executionPlan.preparations.length} preparations · ${summary.executionPlan.steps.length} execution steps`);
     elements.summaryDrawerActions.innerHTML = `<button type="button" class="secondary-button" data-project-liquid-export="copy">${bilingual("复制汇总", "Copy summary")}</button><button type="button" class="secondary-button" data-project-liquid-export="csv">${bilingual("导出汇总 CSV", "Export summary CSV")}</button><button type="button" class="primary-button" data-project-liquid-export="xlsx">${bilingual("导出汇总 XLSX", "Export summary XLSX")}</button>`;
@@ -1952,7 +1988,7 @@
     elements.copyStructureButton.disabled = workspace.plates.length >= 24;
     elements.plateOverview.hidden = !overviewOpen;
     renderProjectLiquidControls();
-    if (workspace.latestLiquidSummary) renderProjectLiquidSummary(workspace.latestLiquidSummary);
+    if (workspace.latestLiquidSummary) renderProjectLiquidSummary(currentLiquidSummary());
     if (overviewOpen) renderPlateOverview();
   }
 
@@ -2078,7 +2114,7 @@
       elements.projectName.value = normalizedName;
       return;
     }
-    commit(() => { project.name = normalizedName; }, { invalidateLiquid: false });
+    commitNonScientific(() => { project.name = normalizedName; });
   });
 
   elements.clearPlateLayoutButton.addEventListener("click", () => {
@@ -2103,7 +2139,7 @@
   });
 
   elements.colorDimension.addEventListener("change", () => {
-    commit(() => { project.colorDimension = elements.colorDimension.value; });
+    commitNonScientific(() => { project.colorDimension = elements.colorDimension.value; });
   });
 
   elements.selectAllButton.addEventListener("click", () => {
@@ -2165,6 +2201,21 @@
     elements.plateCanvas.setPointerCapture(event.pointerId);
     event.preventDefault();
   });
+
+  elements.plateCanvas.addEventListener("wheel", (event) => {
+    event.preventDefault();
+    const oldZoom = plateZoom;
+    plateZoom = Math.min(1.8, Math.max(0.6, plateZoom - event.deltaY * 0.0005));
+    if (plateZoom === oldZoom) return;
+
+    const scroll = elements.plateCanvas.parentElement;
+    const scrollRect = scroll.getBoundingClientRect();
+    const pointerX = event.clientX - scrollRect.left + scroll.scrollLeft;
+    const pointerY = event.clientY - scrollRect.top + scroll.scrollTop;
+    updatePlateZoomDisplay();
+    scroll.scrollLeft = (pointerX / oldZoom) * plateZoom - (event.clientX - scrollRect.left);
+    scroll.scrollTop = (pointerY / oldZoom) * plateZoom - (event.clientY - scrollRect.top);
+  }, { passive: false });
 
   elements.plateCanvas.addEventListener("pointermove", (event) => {
     if (!pointerSession || event.pointerId !== pointerSession.pointerId) return;
@@ -2286,7 +2337,7 @@
       const index = project.dimensions.findIndex((item) => item.id === row.dataset.dimension);
       const nextIndex = orderButton.dataset.action === "up" ? index - 1 : index + 1;
       if (index < 0 || nextIndex < 0 || nextIndex >= project.dimensions.length) return;
-      commit(() => {
+      commitNonScientific(() => {
         [project.dimensions[index], project.dimensions[nextIndex]] = [project.dimensions[nextIndex], project.dimensions[index]];
         const dimensionOrder = new Map(project.dimensions.map((dimension, order) => [dimension.id, order]));
         project.calculationOutputs.sort((left, right) => (dimensionOrder.get(left.id) ?? Infinity) - (dimensionOrder.get(right.id) ?? Infinity));
@@ -2572,7 +2623,7 @@
     if (action === "up" || action === "down") {
       const nextIndex = action === "up" ? index - 1 : index + 1;
       if (nextIndex < 0 || nextIndex >= project.calculationOutputs.length) return;
-      commit(() => {
+      commitNonScientific(() => {
         [project.calculationOutputs[index], project.calculationOutputs[nextIndex]] = [project.calculationOutputs[nextIndex], project.calculationOutputs[index]];
         reorderCalculatedDimensions();
       });
@@ -2615,11 +2666,11 @@
     const plan = Workspace.currentLiquidPlan(project);
     if (plan?.id !== row.dataset.savedLiquidPlan) return;
     const nextName = event.target.value.trim() || plan.recipeName || bilingual("未命名配液方案", "Untitled liquid plan");
-    commit(() => {
+    commitLiquidPlanChange(() => {
       plan.name = nextName.slice(0, 80);
       plan.updatedAt = new Date().toISOString();
       workspace.latestLiquidSummary = null;
-    }, { invalidateLiquid: false });
+    });
     showToast(bilingual("方案名称已更新；请重新生成跨板汇总", "Plan name updated; regenerate the cross-plate summary"));
   });
   elements.savedLiquidPlanList.addEventListener("click", (event) => {
@@ -2644,10 +2695,10 @@
     }
     window.clearTimeout(liquidPlanDeleteTimer);
     pendingLiquidPlanDeleteId = null;
-    commit(() => {
+    commitLiquidPlanChange(() => {
       Object.assign(project, Workspace.clearLiquidPlan(project));
       workspace.latestLiquidSummary = null;
-    }, { invalidateLiquid: false });
+    });
     showToast(bilingual("已清除方案；跨板汇总需要重新生成", "Plan cleared; regenerate the cross-plate summary"));
   });
   elements.projectLiquidScope.addEventListener("change", renderProjectLiquidControls);
@@ -2676,7 +2727,7 @@
       skipped,
     };
     saveProject();
-    renderProjectLiquidSummary(workspace.latestLiquidSummary);
+    renderProjectLiquidSummary(currentLiquidSummary());
     showToast(bilingual("跨板配液汇总已生成，并会写入 XLSX", "Cross-plate liquid summary created and included in XLSX"));
   });
   async function handleProjectLiquidExport(event) {
@@ -2685,7 +2736,7 @@
       return;
     }
     const button = event.target.closest("[data-project-liquid-export]");
-    const summary = workspace.latestLiquidSummary;
+    const summary = currentLiquidSummary();
     if (!button || !summary?.executionPlan?.preparations?.length) return;
     const rows = operatorSummaryRows(summary);
     if (button.dataset.projectLiquidExport === "copy") {
@@ -3077,10 +3128,10 @@
       status: "saved",
     };
     if (action === "save") {
-      commit(() => {
+      commitLiquidPlanChange(() => {
         Object.assign(project, Workspace.publishLiquidPlan(project, saved));
         workspace.latestLiquidSummary = null;
-      }, { invalidateLiquid: false });
+      });
       editingLiquidPlanId = null;
       lastLiquidResult.savedToProject = true;
       renderLiquidResult(lastLiquidResult);
@@ -3314,7 +3365,7 @@
       }
       if (executionRows.length) sheets.push({ name: `${plate.name}-${bilingual("执行", "steps")}`, systemKind: "plate-liquid-execution", rows: executionRows, freezeRows: 0, autoFilter: false });
     }
-    const liquidSummary = workspace.latestLiquidSummary;
+    const liquidSummary = currentLiquidSummary();
     if (liquidSummary?.executionPlan?.preparations?.length) sheets.push(...liquidSummaryWorkbookSheets(liquidSummary));
     else sheets.push({ name: bilingual("跨板配液未生成", "No liquid summary"), systemKind: "liquid-empty", rows: [[bilingual("请先从已保存且有效的配液方案生成跨板汇总。", "Build a cross-plate summary from current saved plans first.")]] });
     return sheets;
@@ -3548,6 +3599,34 @@
   elements.closeProjectFileDialogButton.addEventListener("click", closeProjectFileDialog);
   elements.projectFileDialog.querySelector(".project-file-backdrop").addEventListener("click", closeProjectFileDialog);
 
+  function pendingPlateImportResult() {
+    if (!pendingImportedProject) return null;
+    const mode = elements.importModeSelect.value;
+    if (pendingImportedProject.preparedMode !== mode) {
+      pendingImportedProject.preparedMode = mode;
+      pendingImportedProject.preparedResult = Workspace.importPlates(workspace, pendingImportedProject.plates, { mode, replacePlateId: project.id });
+    }
+    return pendingImportedProject.preparedResult;
+  }
+
+  function renderPendingPlateImport() {
+    const result = pendingPlateImportResult();
+    if (!result) return;
+    if (!result.ok) {
+      elements.confirmImportButton.disabled = true;
+      if (result.error.code === "plate-capacity-exceeded") {
+        elements.importPreview.innerHTML = `<div class="project-liquid-summary-note warning">${escapeHtml(bilingual(`无法导入：识别到 ${result.error.incomingCount} 块板，当前最多还可放入 ${result.error.availableCount} 块。未修改任何数据。`, `Import blocked: ${result.error.incomingCount} plates were found, but only ${result.error.availableCount} slot(s) remain. No data was changed.`))}</div>`;
+      } else elements.importPreview.innerHTML = `<div class="project-liquid-summary-note warning">${escapeHtml(bilingual("无法准备导入，未修改任何数据。", "The import could not be prepared. No data was changed."))}</div>`;
+      return;
+    }
+    elements.confirmImportButton.disabled = false;
+    const renameNote = result.renamed.length
+      ? `<div class="project-liquid-summary-note">${escapeHtml(bilingual(`重名板号将自动调整：${result.renamed.map((item) => `${item.from} → ${item.to}`).join("；")}`, `Duplicate plate names will be adjusted: ${result.renamed.map((item) => `${item.from} → ${item.to}`).join("; ")}`))}</div>`
+      : "";
+    const skippedNote = pendingImportedProject.skipped.length ? `<div class="project-liquid-summary-note">${escapeHtml(bilingual(`将跳过：${pendingImportedProject.skipped.join("、")}`, `Skipped: ${pendingImportedProject.skipped.join(", ")}`))}</div>` : "";
+    elements.importPreview.innerHTML = result.plates.map((plate) => `<div class="import-preview-card"><strong>${escapeHtml(plate.name)}</strong><span>${plate.plateSize} ${bilingual("孔", "well")}</span><small>${escapeHtml(plate.dimensions.map((dimension) => dimension.unit ? `${dimension.name} (${dimension.unit})` : dimension.name).join(" · ") || bilingual("没有参数列", "No parameter columns"))}</small></div>`).join("") + renameNote + skippedNote;
+  }
+
   elements.importJsonInput.addEventListener("change", async () => {
     const file = elements.importJsonInput.files?.[0];
     if (!file) return;
@@ -3573,7 +3652,9 @@
       elements.importModeSelect.options[0].textContent = bilingual("新增孔板", "Add as new plate");
       elements.importModeSelect.options[1].textContent = bilingual("覆盖当前板", "Replace current plate");
       elements.importModeSelect.value = "add";
-      elements.importPreview.innerHTML = pendingImportedProject.plates.map((plate) => `<div class="import-preview-card"><strong>${escapeHtml(plate.name)}</strong><span>${plate.plateSize} ${bilingual("孔", "well")}</span><small>${escapeHtml(plate.dimensions.map((dimension) => dimension.unit ? `${dimension.name} (${dimension.unit})` : dimension.name).join(" · ") || bilingual("没有参数列", "No parameter columns"))}</small></div>`).join("") + (pendingImportedProject.skipped.length ? `<div class="project-liquid-summary-note">${escapeHtml(bilingual(`将跳过：${pendingImportedProject.skipped.join("、")}`, `Skipped: ${pendingImportedProject.skipped.join(", ")}`))}</div>` : "");
+      pendingImportedProject.preparedMode = "";
+      pendingImportedProject.preparedResult = null;
+      renderPendingPlateImport();
       showToast(bilingual(`已识别 ${pendingImportedProject.plates.length} 块板，请核对后确认`, `${pendingImportedProject.plates.length} plate(s) found; review before confirming`));
     } catch (error) {
       console.error(error);
@@ -3595,25 +3676,13 @@
 
   elements.confirmImportButton.addEventListener("click", () => {
     if (!pendingImportedProject) return;
-    const pending = pendingImportedProject;
-    const mode = elements.importModeSelect.value;
-    resetImportConfirmation();
-    commitWorkspace(() => {
-      const available = 24 - workspace.plates.length + (mode === "replace" ? 1 : 0);
-      const incoming = pending.plates.slice(0, available);
-      if (mode === "replace") {
-        const index = workspace.plates.findIndex((plate) => plate.id === project.id);
-        incoming[0].id = project.id;
-        workspace.plates.splice(index, 1, ...incoming);
-        workspace.activePlateId = incoming[0].id;
-      } else {
-        workspace.plates.push(...incoming);
-        workspace.activePlateId = incoming[0].id;
-      }
-    });
+    const result = pendingPlateImportResult();
+    if (!result?.ok) { renderPendingPlateImport(); return; }
+    commitWorkspace(() => { workspace = result.workspace; });
     closeProjectFileDialog();
-    showToast(bilingual(`已导入 ${pending.plates.length} 块孔板`, `${pending.plates.length} plate(s) imported`));
+    showToast(bilingual(`已导入 ${result.plates.length} 块孔板`, `${result.plates.length} plate(s) imported`));
   });
+  elements.importModeSelect.addEventListener("change", renderPendingPlateImport);
 
   elements.restoreJsonInput.addEventListener("change", async () => {
     const file = elements.restoreJsonInput.files?.[0];

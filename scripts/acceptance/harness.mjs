@@ -30,6 +30,41 @@ export function assertTextOrder(text, tokens, label) {
   }
 }
 
+export function parseCsv(text) {
+  const source = String(text).replace(/^\uFEFF/, "");
+  const rows = [];
+  let row = [];
+  let cell = "";
+  let quoted = false;
+  for (let index = 0; index < source.length; index += 1) {
+    const character = source[index];
+    if (character === '"') {
+      if (quoted && source[index + 1] === '"') {
+        cell += '"';
+        index += 1;
+      } else {
+        quoted = !quoted;
+      }
+    } else if (character === "," && !quoted) {
+      row.push(cell);
+      cell = "";
+    } else if ((character === "\n" || character === "\r") && !quoted) {
+      if (character === "\r" && source[index + 1] === "\n") index += 1;
+      row.push(cell);
+      rows.push(row);
+      row = [];
+      cell = "";
+    } else {
+      cell += character;
+    }
+  }
+  if (cell || row.length) {
+    row.push(cell);
+    rows.push(row);
+  }
+  return rows;
+}
+
 export async function createAcceptanceHarness({
   baseUrl = process.env.ACCEPTANCE_BASE_URL || "http://127.0.0.1:4186/",
   outputDirectory = "artifacts/visual-smoke",
@@ -144,6 +179,7 @@ export async function createAcceptanceHarness({
         download,
         downloadText,
         downloadWorkbook,
+        parseCsv,
         assertTextOrder,
         XlsxCore,
       });
@@ -171,6 +207,7 @@ export async function createAcceptanceHarness({
     download,
     downloadText,
     downloadWorkbook,
+    parseCsv,
     runJourney,
     close: () => browser.close(),
   };

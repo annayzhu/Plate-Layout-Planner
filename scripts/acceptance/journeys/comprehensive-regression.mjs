@@ -15,7 +15,7 @@ try {
 
   if (await page.locator(".well").count() !== 24) throw new Error("Initial plate did not render 24 wells.");
   if (await page.locator(".plate-card-heading #selectionCount").count() !== 1) throw new Error("Selection controls are not in the plate's upper-right header.");
-  if (await page.locator("#plateCanvas > .plate-interaction-help").count() !== 1) throw new Error("Selection instructions are not inside the plate visualization.");
+  if (await page.locator("#plateCanvas > .plate-view-head .plate-interaction-help").count() !== 1) throw new Error("Selection instructions are not inside the plate visualization.");
   const plateNameAffordance = await page.locator("#projectName").evaluate((input) => {
     const style = getComputedStyle(input);
     return { borderBottomStyle: style.borderBottomStyle, cursor: style.cursor };

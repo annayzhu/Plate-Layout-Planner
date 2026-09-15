@@ -122,7 +122,10 @@
 
           <div class="plate-scroll">
             <div id="plateCanvas" class="plate-canvas" aria-label="可交互孔板布局">
-              <p class="plate-interaction-help" data-i18n="selectionHelp">单击单选，Ctrl/⌘ 单击逐个增减，拖动框选，Shift 单击连选；单击空白处取消选择。</p>
+              <div class="plate-view-head">
+                <p class="plate-interaction-help" data-i18n="selectionHelp">单击单选，Ctrl/⌘ 单击逐个增减，拖动框选，Shift 单击连选；单击空白处取消选择。滚轮缩放视图。</p>
+                <output id="plateZoomIndicator" class="plate-zoom-indicator" aria-live="polite">100%</output>
+              </div>
               <div id="plateGrid" class="plate-grid"></div>
               <div id="selectionBox" class="selection-box" hidden></div>
             </div>

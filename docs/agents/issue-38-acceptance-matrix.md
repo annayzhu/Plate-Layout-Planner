@@ -19,7 +19,7 @@ The issue remains open until every row is `PASS`. PR merge alone is not acceptan
 | AC-11 | Complete unit suite passes | `npm test`: 70/70 | Unit | PASS |
 | AC-12 | Complete browser suite passes, including 24/96/384 zoom | Comprehensive baseline and all five isolated journeys, including `issue-38-plate-zoom`, pass | Local browser | PASS |
 | AC-13 | CSV/XLSX affected outputs are parsed and checked | Renamed summary XLSX and post-delete summary CSV are captured, parsed into sheets or CSV rows/cells, and read back on the exact changed path | Local files | PASS |
-| AC-14 | Merged source, production Site, and fresh offline archive pass and match | Release pending | Main + Site + offline | NOT RUN |
+| AC-14 | Merged source, production Site, and fresh offline archive pass and match | GitHub `main` `549f617`; Sites version 9 live browser read-back; fresh r15 extraction passed the complete browser suite; core asset hashes match | Main + Site + offline | PASS |
 
 ## Authoritative seams
 
@@ -27,3 +27,12 @@ The issue remains open until every row is `PASS`. PR merge alone is not acceptan
 - `WorkspaceCore.resolveSummaryPlates()` resolves stored summary scope against current workspace identity and order.
 - `currentLiquidSummary()` derives presentation and export rows from current saved plans rather than trusting cached names or groups.
 - `plateZoom` is presentation-only session state and never enters workspace persistence or undo history.
+
+## Release evidence
+
+- Product PRs: #39 (implementation) and #40 (cache-safe asset revision), both squash-merged.
+- GitHub source: `main` at `549f617bacb5c26bacdbf4259fe7257efccb8fc1`.
+- Production Site: version 9 at `https://plate-layout-planner.pountneycitlali784.chatgpt.site/plate/`; live UI changed from 100% to 122% on plate-canvas wheel input and retained a two-well Ctrl/Command selection.
+- Offline archive: `Plate-Layout-Planner_Offline_20260915_r15.zip`; a fresh extraction passed the comprehensive journey and all five isolated journeys.
+- `Plate-Layout-Planner_Offline_LATEST.zip` is byte-identical to r15; both archives have SHA-256 `1fca3e7bdc5b1ed241970afe00feb1fdc0c02049aaeacc39baf39eb3c2d5782b`.
+- Source, Site payload, and fresh offline extraction match for the four changed delivery-critical assets: `index.html` `c514fc10…`, `app.js` `947cf574…`, `styles.css` `bacebb3c…`, and `workspace-core.js` `603c1e8e…`.

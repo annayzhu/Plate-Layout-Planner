@@ -11,7 +11,7 @@ if (!process.argv[2] || destination === root) throw new Error('Provide a new out
 try { await access(destination); throw new Error('Output already exists; choose a new directory'); }
 catch (error) { if (error.code !== 'ENOENT') throw error; }
 const html = await readFile(resolve(root, 'index.html'), 'utf8');
-const files = ['index.html', 'README.md', 'vendor/preparation-kernel.provenance.json', ...[...html.matchAll(/(?:src|href)="([^"?#]+)(?:\?[^"#]*)?"/g)].map(m=>m[1]).filter(file=>/\.(css|js)$/.test(file))];
+const files = ['index.html', 'README.md', 'docs/preparation-integration.md', 'vendor/preparation-kernel.provenance.json', ...[...html.matchAll(/(?:src|href)="([^"?#]+)(?:\?[^"#]*)?"/g)].map(m=>m[1]).filter(file=>/\.(css|js)$/.test(file))];
 for (const file of files) {
   execFileSync('git', ['ls-files', '--error-unmatch', file], {cwd:root,stdio:'pipe'});
   execFileSync('git', ['diff', '--quiet', 'HEAD', '--', file], {cwd:root});

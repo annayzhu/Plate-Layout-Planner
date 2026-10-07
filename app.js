@@ -3340,6 +3340,7 @@
     const rows = [[bilingual("执行顺序", "Step"), bilingual("阶段", "Phase"), bilingual("操作", "Action"), bilingual("目的物/分组", "Cargo / group"), bilingual("目标板", "Target plate"), bilingual("目标孔", "Target well"), bilingual("每孔操作体积", "Action volume per well"), bilingual("实际加入量", "Actual volume"), bilingual("完成状态", "Done"), bilingual("操作者", "Operator"), bilingual("时间", "Time"), bilingual("备注", "Notes")]];
     for (const step of summary?.executionPlan?.steps || []) {
       const sources = step.sources || [];
+      const transferVolume = step.transferVolumeUL ?? step.perWellVolume;
       rows.push([
         step.sequence,
         phaseLabels[step.phase] || step.phase,
@@ -3348,7 +3349,7 @@
         [...new Set(sources.map((source) => source.plateName || source.plateId))].join("；"),
         sources.map((source) => `${source.plateName || source.plateId}: ${(source.scopeWellIds || []).join(", ")}`).join("；"),
         step.perWellVolume ? `${liquidNumber(step.perWellVolume)} µL` : "",
-        "", "□", "", "", step.perWellVolume > 0 && step.perWellVolume < 1 ? bilingual("移液量低于 1 µL，请复核", "Transfer below 1 µL; review") : "",
+        "", "□", "", "", transferVolume > 0 && transferVolume < 1 ? bilingual("移液量低于 1 µL，请复核", "Transfer below 1 µL; review") : "",
       ]);
     }
     return rows;

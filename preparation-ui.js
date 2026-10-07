@@ -77,7 +77,7 @@
       if (prep.addToExistingUL != null) {
         const total = prep.totalAdditionUL != null;
         const amount = total ? prep.totalAdditionUL : prep.dispenseUL;
-        return [{phase:'dispense',perWellVolume:total?0:amount,action:t(`${total?'本次':'每孔'}向已有 ${quantity(prep.addToExistingUL)} µL 液体加入 ${quantity(amount)} µL ${label}，最终 ${quantity(prep.finalVolumeUL)} µL；已有液体不再添加，余量不进入孔内。`,`${total?'For this batch':'Per well'}, add ${quantity(amount)} µL ${label} to the existing ${quantity(prep.addToExistingUL)} µL; final ${quantity(prep.finalVolumeUL)} µL. Do not add existing liquid again or dose preparation overage.`)}];
+        return [{phase:'dispense',perWellVolume:total?0:amount,transferVolumeUL:amount,action:t(`${total?'本次':'每孔'}向已有 ${quantity(prep.addToExistingUL)} µL 液体加入 ${quantity(amount)} µL ${label}，最终 ${quantity(prep.finalVolumeUL)} µL；已有液体不再添加，余量不进入孔内。`,`${total?'For this batch':'Per well'}, add ${quantity(amount)} µL ${label} to the existing ${quantity(prep.addToExistingUL)} µL; final ${quantity(prep.finalVolumeUL)} µL. Do not add existing liquid again or dose preparation overage.`)}];
       }
       const targets=(prep.samples||[]).some(s=>s.sample!=='')?prep.samples:[{wellId:null,sample:''}];
       return [

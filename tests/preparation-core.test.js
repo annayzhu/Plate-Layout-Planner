@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const Prep = require('../preparation-core.js');
 const Workspace = require('../workspace-core.js');
+require('../preparation-ui.js');
 const scope = { plateId: 'plate1', plateName: 'Plate 1', wells: ['A1','A2','A3','B1','B2','B3'].map(id => ({ id, group: 'PCR' })) };
 const recipe = { finalVolume: 20, overagePercent: 10, diluent: 'Water', rows: [
   { name: '2× Mix', volume: '10', premix: true },
@@ -95,4 +96,12 @@ test('separate sample identities remain attached to exact wells without entering
   assert.deepEqual(result.groups.map(g=>g.label),['0','Missing']);
   assert.deepEqual(result.contributions[0].preparation.samples,[{wellId:'A1',sample:'S1'}]);
   assert.ok(!result.contributions.some(c=>['S1','S2','Template'].includes(c.component)));
+});
+test('total dosing instructions retain actual transfer volume independently of per-well fields',()=>{
+  const input={mode:'add',stock:100,stockUnit:'µM',target:1,targetUnit:'µM',initial:0,volume:94.05,volumeUnit:'µL',volumeMode:'total',overagePercent:10,stockName:'Stock',diluent:'Medium'};
+  const result=Prep.calculate('dilution',input,scope);
+  const step=globalThis.PreparationUI.create('en').executionSteps(result.groups[0].preparation,'Stock')[0];
+  assert.equal(step.perWellVolume,0);
+  assert.ok(Math.abs(step.transferVolumeUL-.95)<1e-12);
+  assert.match(step.action,/For this batch/);
 });

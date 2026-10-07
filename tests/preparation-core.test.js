@@ -87,4 +87,11 @@ test('invalid normalization identities stay visible and block the complete publi
   assert.deepEqual(result.contributions,[]);
   assert.throws(()=>Prep.calculate('reaction',{...recipe,rows:[{name:'Template',volume:'20',premix:false}]},scope),/No premix/);
   assert.throws(()=>Prep.calculate('reaction',{...recipe,finalVolume:5},scope),/exceed/);
+  assert.throws(()=>Prep.calculate('reaction',{...recipe,diluent:'template'},scope),/separate sample/);
+});
+test('separate sample identities remain attached to exact wells without entering the pooled recipe',()=>{
+  const result=Prep.calculate('reaction',recipe,{...scope,wells:[{id:'A1',sample:'S1',group:0},{id:'A2',sample:'S2',group:'Missing'}]});
+  assert.deepEqual(result.groups.map(g=>g.label),['0','Missing']);
+  assert.deepEqual(result.contributions[0].preparation.samples,[{wellId:'A1',sample:'S1'}]);
+  assert.ok(!result.contributions.some(c=>['S1','S2','Template'].includes(c.component)));
 });

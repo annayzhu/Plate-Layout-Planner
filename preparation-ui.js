@@ -9,6 +9,7 @@
   const units = ['nM','µM','mM','ng/µL','µg/mL','mg/mL'];
   function create(language) {
     const t = (zh,en) => language === 'en' ? en : zh;
+    const quantity=value=>value===null?'—':Number(value.toPrecision(12));
     const field = (key,label,value,extra='') => `<label><span>${label}</span><input name="${key}" value="${escape(value)}" ${extra}></label>`;
     const options = (items,value) => items.map(item => { const [key,label] = Array.isArray(item) ? item : [item,item]; return `<option value="${escape(key)}"${key===value?' selected':''}>${escape(label)}</option>`; }).join('');
     function rowMarkup(row) {
@@ -71,8 +72,20 @@
       if(kind==='reaction')return {...common,overagePercent:values.prepOverage,mergeCompatible:values.prepMerge==='on',rows:JSON.parse(values.prepRows)};
       return {...common,target:values.prepTarget,unit:values.prepUnit,rows:JSON.parse(values.prepSamples)};
     }
+    // One instruction formatter serves the immediate result and project exports.
+    function executionSteps(prep,label) {
+      if (prep.addToExistingUL != null) {
+        const total = prep.totalAdditionUL != null;
+        const amount = total ? prep.totalAdditionUL : prep.dispenseUL;
+        return [{phase:'dispense',perWellVolume:total?0:amount,action:t(`${total?'本次':'每孔'}向已有 ${quantity(prep.addToExistingUL)} µL 液体加入 ${quantity(amount)} µL ${label}，最终 ${quantity(prep.finalVolumeUL)} µL；已有液体不再添加，余量不进入孔内。`,`${total?'For this batch':'Per well'}, add ${quantity(amount)} µL ${label} to the existing ${quantity(prep.addToExistingUL)} µL; final ${quantity(prep.finalVolumeUL)} µL. Do not add existing liquid again or dose preparation overage.`)}];
+      }
+      const targets=(prep.samples||[]).some(s=>s.sample!=='')?prep.samples:[{wellId:null,sample:''}];
+      return [
+        ...(prep.dispenseUL?[{phase:'dispense',perWellVolume:prep.dispenseUL,action:t(`每孔分装 ${quantity(prep.dispenseUL)} µL ${label} 预混液。`,`Dispense ${quantity(prep.dispenseUL)} µL ${label} premix per well.`)}]:[]),
+        ...(prep.separate||[]).flatMap(c=>targets.map(target=>({phase:'separate-sample',perWellVolume:c.perWellUL,wellId:target.wellId,action:t(`${target.wellId?target.wellId+(target.sample?`（样本 ${target.sample}）`:''):'每孔'}：独立加入 ${c.name} ${quantity(c.perWellUL)} µL；不同样本不得混合。`,`${target.wellId?target.wellId+(target.sample?` (sample ${target.sample})`:''):'Each well'}: add ${c.name} ${quantity(c.perWellUL)} µL separately; never pool samples.`)}))),
+      ];
+    }
     function presentation(result) {
-      const quantity=value=>value===null?'—':Number(value.toPrecision(12));
       if(result.kind==='normalization')return {
         headers:[t('孔位','Well'),t('样本','Sample'),t('样本 µL','Sample µL'),t('稀释液 µL','Diluent µL'),t('状态','Status')],
         rows:result.samples.map(s=>[s.wellId,s.id,quantity(s.sampleUL),quantity(s.diluentUL),s.status]),
@@ -82,12 +95,12 @@
       if (result.mode === 'add') return {
         headers:[t('组分','Component'),total?t('本次用量 µL','Amount µL'):t('每孔 µL','Per well µL'),t('需准备 µL（含余量）','To prepare µL (incl. overage)'),t('说明','Note')],
         rows:result.groups[0].components.map(c=>[c.name,quantity(c.perWellUL),quantity(c.preparedVolumeUL),c.existing?t('已有液体，不再配制','Already present; do not prepare again'):t('加入已有液体','Add to existing liquid')]),
-        checklist:[t(`${total?'本次':'每孔'}向已有 ${quantity(result.perWell.diluentUL)} µL 液体加入 ${quantity(result.perWell.stockUL)} µL ${result.groups[0].label}，最终 ${quantity(result.perWell.finalUL)} µL；余量仅用于备液，不多加到孔内。`,`${total?'For this batch':'Per well'}, add ${quantity(result.perWell.stockUL)} µL ${result.groups[0].label} to the existing ${quantity(result.perWell.diluentUL)} µL; final ${quantity(result.perWell.finalUL)} µL. Overage is for preparation, not extra dosing.`)],
+        checklist:executionSteps(result.groups[0].preparation,result.groups[0].label).map(step=>step.action),
       };
       return {
         headers:[t('组','Group'),t('目标孔','Wells'),t('组分','Component'),total?t('基础总量 µL','Base total µL'):t('每孔 µL','Per well µL'),t('含余量整批 µL','Batch incl. overage µL'),t('加入方式','Addition')],
         rows:result.groups.flatMap(g=>g.components.map(c=>[g.label,g.wellIds.join(', '),c.name,quantity(c.perWellUL),quantity(c.preparedVolumeUL),c.premix?t('预混','Premix'):t('独立加入，不混样','Separate; never pool')])),
-        checklist:result.groups.flatMap(g=>[t(`${g.label}：按整批量配制预混液。`,`${g.label}: prepare the batch premix.`),...(g.dispenseUL?[t(`每孔分装 ${quantity(g.dispenseUL)} µL。`,`Dispense ${quantity(g.dispenseUL)} µL per well.`)]:[]),...g.components.filter(c=>!c.premix).map(c=>t(`每孔独立加入 ${c.name} ${quantity(c.perWellUL)} µL。`,`Add ${c.name} ${quantity(c.perWellUL)} µL separately to each well.`))]),
+        checklist:result.groups.flatMap(g=>[t(`${g.label}：按整批量配制预混液。`,`${g.label}: prepare the batch premix.`),...executionSteps(g.preparation,g.label).map(step=>step.action)]),
       };
     }
     function dilutionFields() {
@@ -99,7 +112,7 @@
         label('stockFold',t('母液倍数','Stock fold'),10,'fold')+label('targetFold',t('目标倍数','Target fold'),1,'fold')+
         label('dilutionRatio','N',100,'ratio')+label('stockParts',t('母液份数','Stock parts'),1,'parts')+label('diluentParts',t('稀释液份数','Diluent parts'),9,'parts');
     }
-    return {fields,mount,sync,input,presentation,dilutionFields};
+    return {fields,mount,sync,input,presentation,dilutionFields,executionSteps};
   }
   root.PreparationUI={create};
 })(globalThis);

@@ -27,9 +27,10 @@
     const diluent = name(input.diluent, '补足液 / Diluent');
     const rows = input.rows.map(row => ({ ...row, name: name(row.name, '组分 / Component') }));
     if (new Set(rows.map(row => row.name.toLowerCase())).size !== rows.length) throw new Error('组分名称重复 / Duplicate component names');
+    if (rows.some(row => !row.premix && row.name.toLowerCase() === diluent.toLowerCase())) throw new Error('补足液不能与独立样本同名 / Diluent must not identify a separate sample');
     const grouped = new Map();
     for (const well of scope.wells) {
-      const label = well.group || 'Master Mix';
+      const label = String(well.group ?? 'Master Mix');
       if (!grouped.has(label)) grouped.set(label, []);
       grouped.get(label).push(well.id);
     }
@@ -49,7 +50,9 @@
         components[existing].preparedVolumeUL += extra.preparedVolumeUL;
       }
       if (!components.some(c => c.premix && c.perWellUL > 0)) throw new Error('没有需要配制的预混组分 / No premix component to prepare');
-      return { label, wellIds, finalVolumeUL, dispenseUL: finalVolumeUL - plan.separate, preparedVolumeUL: plan.total, components };
+      const samples = scope.wells.filter(w => wellIds.includes(w.id)).map(w => ({ wellId: w.id, sample: String(w.sample ?? '') }));
+      const preparation = { kind: 'reaction', dispenseUL: finalVolumeUL - plan.separate, finalVolumeUL, separate: components.filter(c => !c.premix), samples };
+      return { label, wellIds, finalVolumeUL, dispenseUL: preparation.dispenseUL, preparedVolumeUL: plan.total, components, preparation };
     });
     const contributions = groups.flatMap((group, index) => {
       // Names describe a confirmed stock identity; scope and overage are not recipe identity.
@@ -59,7 +62,7 @@
         module: 'reaction', groupKey, mergeScope: input.mergeCompatible === true ? 'project' : 'plate', groupLabel: group.label, groupName: group.label, planName: 'Master Mix',
         plateId: scope.plateId, plateName: scope.plateName, scopeWellIds: group.wellIds,
         component: component.name, baseVolume: component.perWellUL * group.wellIds.length, perWellVolume: component.perWellUL, unit: 'µL', displayOrder: index,
-        preparation: { kind: 'reaction', dispenseUL: group.dispenseUL, finalVolumeUL, separate: group.components.filter(c => !c.premix) },
+        preparation: group.preparation,
       }));
     });
     return { version: VERSION, kind: 'reaction', status: 'valid', groups, contributions, overagePercent };
@@ -115,11 +118,12 @@
     const adding = input.mode === 'add';
     const components = [{ name: stockName, perWellUL: plan.sample, existing: false }, { name: diluent, perWellUL: plan.diluent, existing: adding }].map(c => ({ ...c, premix: !adding, preparedVolumeUL: c.existing ? null : c.perWellUL * count * (1 + overagePercent / 100) }));
     const group = { label: stockName, wellIds: scope.wells.map(w => w.id), finalVolumeUL: plan.final, dispenseUL: input.volumeMode === 'total' ? 0 : adding ? plan.sample : plan.final, preparedVolumeUL: (adding ? plan.sample : plan.final) * count * (1 + overagePercent / 100), components };
+    group.preparation = { kind: 'dilution', dispenseUL: group.dispenseUL, addToExistingUL: adding ? plan.diluent : null, totalAdditionUL: adding && input.volumeMode === 'total' ? plan.sample : null, finalVolumeUL: plan.final, separate: [] };
     // Routine dilution remains plate-local unless a complete material identity is provided.
     const contributions = components.filter(c => !c.existing).map(c => ({ module: 'dilution', groupKey: 'dilution', mergeScope: 'plate', groupLabel: stockName, groupName: stockName,
       plateId: scope.plateId, plateName: scope.plateName, scopeWellIds: group.wellIds, planName: 'Dilution',
       component: c.name, baseVolume: c.perWellUL * count, perWellVolume: input.volumeMode === 'total' ? 0 : c.perWellUL, unit: 'µL',
-      preparation: { kind: 'dilution', dispenseUL: group.dispenseUL, addToExistingUL: adding ? plan.diluent : null, totalAdditionUL: adding && input.volumeMode === 'total' ? plan.sample : null, finalVolumeUL: plan.final, separate: [] },
+      preparation: group.preparation,
     }));
     return { version: VERSION, kind:'dilution', mode:input.mode, volumeMode:input.volumeMode, status:'valid', groups:[group], contributions, overagePercent, perWell:{ stockUL:plan.sample, diluentUL:plan.diluent, finalUL:plan.final } };
   }

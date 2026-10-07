@@ -1201,8 +1201,8 @@
     return { plateId: project.id, plateName: project.name,
       dimensions: project.dimensions.map(d => ({ id: d.id, label: dimensionLabel(d) })),
       wells: liquidTargetWellIds().map(id => ({ id,
-        sample: currentWells()[id]?.params?.sample || "",
-        group: groupDimension ? String(currentWells()[id]?.params?.[groupDimension] || bilingual("未分组", "Ungrouped")) : "Master Mix",
+        sample: String(currentWells()[id]?.params?.sample ?? ""),
+        group: groupDimension ? String(currentWells()[id]?.params?.[groupDimension] ?? "").trim() || bilingual("未分组", "Ungrouped") : "Master Mix",
       })),
     };
   }
@@ -1225,6 +1225,8 @@
     const result = Preparation.calculate(kind, inputOverride || preparationUI().input(kind, values), preparationScope(values.groupDimension));
     const view = preparationUI().presentation(result);
     const warnings = result.status === "partial" ? [bilingual("有无效样本行，请修正后再保存；本次结果未写入项目。", "Invalid sample rows must be corrected before saving. The project is unchanged.")] : [];
+    const smallTransfers = [...new Set(result.groups.flatMap(group => group.components.filter(c => !c.existing && c.perWellUL > 0 && c.perWellUL < 1).map(c => c.name)))];
+    if (smallTransfers.length) warnings.push(bilingual(`以下组分单次移液量低于 1 µL，请复核移液器或准备合适工作液：${smallTransfers.join("、")}。`, `Transfers below 1 µL; check pipette capability or prepare a suitable working stock: ${smallTransfers.join(", ")}.`));
     renderLiquidResult({ module: activeLiquidModule, input: values, recipeName: kind === "reaction" ? "Master Mix" : kind === "normalization" ? bilingual("浓度归一化", "Normalization") : bilingual("稀释与加药", "Dilution & dosing"),
       ...view, meta: [bilingual(`${liquidTargetWellIds().length} 个目标孔`, `${liquidTargetWellIds().length} target wells`)], warnings,
       contributions: result.contributions.map(c => ({ ...c, savedPreparedVolume: c.baseVolume * (c.overagePolicy === "none" ? 1 : 1 + result.overagePercent / 100), planOveragePercent: result.overagePercent })),
@@ -1233,11 +1235,11 @@
     if (result.status !== "valid") document.querySelectorAll('[data-liquid-action="save"], [data-liquid-action="save-preset"]').forEach(button => { button.disabled = true; });
   }
 
-  function openLiquidDrawer(module = activeLiquidModule) {
+  function openLiquidDrawer(module = activeLiquidModule, { captureCurrent = true } = {}) {
     renderLiquidScopeBadge();
     elements.liquidDrawer.hidden = false;
     document.body.style.overflow = "hidden";
-    renderLiquidModule(module);
+    renderLiquidModule(module, { captureCurrent });
     elements.closeLiquidDrawerButton.focus({ preventScroll: true });
   }
 
@@ -1429,16 +1431,10 @@
     }, ...item.sources.flatMap(source => {
       const prep = source.preparation;
       if (!prep) return [];
-      const common = { phase: "dispense", cargoIdentity: "", label: item.label, sources: [source], target: `${source.plateName}: ${source.scopeWellIds.join(", ")}` };
-      if (prep.addToExistingUL !== null && prep.addToExistingUL !== undefined) {
-        const amount = prep.totalAdditionUL ?? prep.dispenseUL;
-        const scope = prep.totalAdditionUL !== null ? bilingual("本次", "For this batch") : bilingual("每孔", "Per well");
-        return [{ ...common, action: bilingual(`${scope}向已有 ${liquidNumber(prep.addToExistingUL)} µL 液体加入 ${liquidNumber(amount)} µL ${item.label}。已有液体不再添加；余量不进入孔内。`, `${scope}, add ${liquidNumber(amount)} µL ${item.label} to the existing ${liquidNumber(prep.addToExistingUL)} µL. Do not add the existing liquid again or dose preparation overage.`), perWellVolume: prep.dispenseUL }];
-      }
-      return [
-        ...(prep.dispenseUL ? [{ ...common, action: bilingual(`每孔分装 ${liquidNumber(prep.dispenseUL)} µL ${item.label} 预混液。`, `Dispense ${liquidNumber(prep.dispenseUL)} µL ${item.label} premix per well.`), perWellVolume: prep.dispenseUL }] : []),
-        ...(prep.separate || []).map(c => ({ ...common, phase: "separate-sample", action: bilingual(`每孔独立加入 ${c.name} ${liquidNumber(c.perWellUL)} µL；不同样本不得混合。`, `Add ${c.name} ${liquidNumber(c.perWellUL)} µL separately per well; never pool samples.`), perWellVolume: c.perWellUL })),
-      ];
+      return preparationUI().executionSteps(prep, item.label).map(step => ({
+        ...step, cargoIdentity: "", label: item.label,
+        sources: [{ ...source, scopeWellIds: step.wellId ? [step.wellId] : source.scopeWellIds }],
+      }));
     })]).map((step,index) => ({ ...step, sequence: transfection.steps.length + index + 1 }));
     return { version: LiquidPlan.EXECUTION_PLAN_VERSION, preparations: [...transfection.preparations, ...otherPreparations], steps: [...transfection.steps, ...otherSteps] };
   }
@@ -2735,7 +2731,7 @@
         return;
       }
       liquidDrafts[plan.module] = { ...(plan.input || {}) };
-      openLiquidDrawer(plan.module);
+      openLiquidDrawer(plan.module, { captureCurrent: false });
       showToast(bilingual("已载入方案；重新计算并保存会更新原条目", "Plan loaded; recalculate and save to update this entry"));
       return;
     }
@@ -3335,7 +3331,7 @@
       "add-complex": bilingual("加入复合物", "Add complex"),
       "add-cells": bilingual("加入细胞悬液", "Add cell suspension"),
       "prepare-standard": bilingual("准备其他配液", "Prepare other solution"),
-      "dispense": bilingual("分装预混液", "Dispense premix"),
+      "dispense": bilingual("定量加样", "Dose or dispense"),
       "separate-sample": bilingual("独立加样", "Add samples separately"),
     };
     const rows = [[bilingual("执行顺序", "Step"), bilingual("阶段", "Phase"), bilingual("操作", "Action"), bilingual("目的物/分组", "Cargo / group"), bilingual("目标板", "Target plate"), bilingual("目标孔", "Target well"), bilingual("每孔操作体积", "Action volume per well"), bilingual("实际加入量", "Actual volume"), bilingual("完成状态", "Done"), bilingual("操作者", "Operator"), bilingual("时间", "Time"), bilingual("备注", "Notes")]];

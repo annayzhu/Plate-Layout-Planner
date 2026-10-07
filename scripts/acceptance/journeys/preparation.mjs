@@ -3,6 +3,11 @@ import {writeFile} from 'node:fs/promises';
 
 export async function preparationJourney({page,downloadText,downloadWorkbook,outputDirectory}) {
   await page.locator('[data-size="6"]').click();
+  for(const [wellId,sample] of [['A1','S1'],['A2','S2']]) {
+    await page.locator(`[data-well="${wellId}"]`).click();
+    await page.locator('.parameter-input-row').filter({hasText:'样本'}).locator('.parameter-value').fill(sample);
+    await page.locator('#applyParametersButton').click();
+  }
   await page.locator('#selectAllButton').click();
   await page.locator('.liquid-module-launch[data-liquid-module="reaction"]').click();
   const form=page.locator('#liquidActiveForm');
@@ -18,6 +23,9 @@ export async function preparationJourney({page,downloadText,downloadWorkbook,out
   await form.locator('[name="prepOverage"]').fill('20');
   assert.equal(await page.locator('[data-liquid-action="save"]').count(),0,'edits invalidate computed preview');
   await page.locator('#closeLiquidDrawerButton').click();
+  await page.locator('[data-liquid-plan-action="edit"]').click();
+  assert.equal(await form.locator('[name="prepOverage"]').inputValue(),'10','unsaved draft does not overwrite reopened saved plan');
+  await page.locator('#closeLiquidDrawerButton').click();
   await page.locator('#projectLiquidSummaryButton').click();
   await page.locator('[data-open-liquid-summary]').click();
   const summary=await downloadWorkbook(()=>page.locator('[data-project-liquid-export="xlsx"]').first().click());
@@ -25,12 +33,24 @@ export async function preparationJourney({page,downloadText,downloadWorkbook,out
   assert.match(summaryText,/Template/);
   assert.match(summaryText,/独立加入/);
   assert.match(summaryText,/66/);
+  assert.match(summaryText,/A1（样本 S1）/);
+  assert.match(summaryText,/A2（样本 S2）/);
   await page.locator('#closeSummaryDrawerButton').click();
   const project=await downloadWorkbook(()=>page.locator('#exportXlsxButton').click());
   assert.match(JSON.stringify(project.workbook),/Template/);
+  const backup=await downloadText(()=>page.locator('#exportJsonButton').click());
+  const saved=JSON.parse(backup.text);
+  const savedPlan=saved.plates.find(p=>p.id===saved.activePlateId).liquidPlans[0];
+  assert.equal(savedPlan.resultSnapshot.structuredPreparation.groups[0].dispenseUL,18);
+  await page.locator('#openBackupRestoreButton').click();
+  await page.locator('#restoreJsonInput').setInputFiles({name:'preparation.json',mimeType:'application/json',buffer:backup.bytes});
+  await page.locator('#confirmRestoreButton').click();
   await page.reload({waitUntil:'networkidle'});
+  await page.locator('[data-well="A1"]').click();
   await page.locator('[data-liquid-plan-action="edit"]').click();
   assert.equal(await form.locator('[name="prepOverage"]').inputValue(),'10','saved inputs survive reload');
+  await form.locator('button[type="submit"]').click();
+  assert.match(await page.locator('#liquidResultHost').innerText(),/66/,'editing restores saved six-well scope');
   await page.locator('#closeLiquidDrawerButton').click();
   await page.locator('#selectAllButton').click();
   await page.locator('.liquid-module-launch[data-liquid-module="normalization"]').click();
@@ -56,7 +76,20 @@ export async function preparationJourney({page,downloadText,downloadWorkbook,out
   await form.locator('[name="dilutionOveragePercent"]').fill('0');
   await form.locator('button[type="submit"]').click();
   assert.match(await page.locator('#liquidResultHost').innerText(),/90/);
-  const files={csv,summary,project,normalization:normalized};
-  for (const [name,result] of Object.entries(files)) await writeFile(`${outputDirectory}/${name}.${name==='csv'?'csv':'xlsx'}`,result.bytes);
+  await form.locator('[name="dilutionMode"]').selectOption('final');
+  await form.locator('[name="stockConcentration"]').fill('10');
+  await form.locator('[name="stockUnit"]').selectOption('mM');
+  await form.locator('[name="targetConcentration"]').fill('1');
+  await form.locator('[name="targetUnit"]').selectOption('µM');
+  await form.locator('button[type="submit"]').click();
+  assert.match(await page.locator('#liquidResultHost').innerText(),/低于 1 µL/);
+  await page.setViewportSize({width:390,height:844});
+  await page.locator('#liquidModuleTabs [data-liquid-module="reaction"]').click();
+  const widths=await form.evaluate(el=>({content:el.scrollWidth,visible:el.clientWidth}));
+  assert.ok(widths.content<=widths.visible+1,`Mobile form overflows: ${JSON.stringify(widths)}`);
+  await page.screenshot({path:`${outputDirectory}/master-mix-mobile.png`,fullPage:true});
+  await page.setViewportSize({width:1500,height:1100});
+  const files={csv,summary,project,normalization:normalized,backup};
+  for (const [name,result] of Object.entries(files)) await writeFile(`${outputDirectory}/${name}.${name==='csv'?'csv':name==='backup'?'json':'xlsx'}`,result.bytes);
   return {exports:Object.keys(files),readBack:true};
 }

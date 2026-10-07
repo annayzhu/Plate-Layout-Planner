@@ -18,6 +18,7 @@ test('reaction preparation keeps templates separate and scales premix once', () 
   assert.equal(result.groups[0].components.find(c => c.name === 'Template').preparedVolumeUL, null);
   assert.deepEqual(result.groups[0].wellIds, ['A1','A2','A3','B1','B2','B3']);
   assert.ok(result.contributions.every(c => c.component !== 'Template'));
+  assert.ok(Workspace.mergeLiquidContributions(result.contributions,{overagePercent:10}).groups[0].components.every(c=>!c.warning),'premix uses actual batch transfers, not theoretical per-well shares');
 });
 test('cross-plate totals merge compatible premix once, but never add overage to normalization samples', () => {
   const a = Prep.calculate('reaction', {...recipe,mergeCompatible:true},scope);

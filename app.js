@@ -1225,7 +1225,10 @@
     const result = Preparation.calculate(kind, inputOverride || preparationUI().input(kind, values), preparationScope(values.groupDimension));
     const view = preparationUI().presentation(result);
     const warnings = result.status === "partial" ? [bilingual("有无效样本行，请修正后再保存；本次结果未写入项目。", "Invalid sample rows must be corrected before saving. The project is unchanged.")] : [];
-    const smallTransfers = [...new Set(result.groups.flatMap(group => group.components.filter(c => !c.existing && c.perWellUL > 0 && c.perWellUL < 1).map(c => c.name)))];
+    const smallTransfers = [...new Set(result.groups.flatMap(group => [
+      ...group.components.filter(c => { const transfer = c.premix ? c.preparedVolumeUL : c.perWellUL; return !c.existing && transfer > 0 && transfer < 1; }).map(c => c.name),
+      ...(group.dispenseUL > 0 && group.dispenseUL < 1 ? [bilingual("孔内分装", "Well dispensing")] : []),
+    ]))];
     if (smallTransfers.length) warnings.push(bilingual(`以下组分单次移液量低于 1 µL，请复核移液器或准备合适工作液：${smallTransfers.join("、")}。`, `Transfers below 1 µL; check pipette capability or prepare a suitable working stock: ${smallTransfers.join(", ")}.`));
     renderLiquidResult({ module: activeLiquidModule, input: values, recipeName: kind === "reaction" ? "Master Mix" : kind === "normalization" ? bilingual("浓度归一化", "Normalization") : bilingual("稀释与加药", "Dilution & dosing"),
       ...view, meta: [bilingual(`${liquidTargetWellIds().length} 个目标孔`, `${liquidTargetWellIds().length} target wells`)], warnings,
@@ -3345,7 +3348,7 @@
         [...new Set(sources.map((source) => source.plateName || source.plateId))].join("；"),
         sources.map((source) => `${source.plateName || source.plateId}: ${(source.scopeWellIds || []).join(", ")}`).join("；"),
         step.perWellVolume ? `${liquidNumber(step.perWellVolume)} µL` : "",
-        "", "□", "", "", "",
+        "", "□", "", "", step.perWellVolume > 0 && step.perWellVolume < 1 ? bilingual("移液量低于 1 µL，请复核", "Transfer below 1 µL; review") : "",
       ]);
     }
     return rows;

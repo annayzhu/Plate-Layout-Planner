@@ -384,7 +384,7 @@
         incubationMinutes: item.incubationMinutes === null ? null : Number(item.incubationMinutes) || null,
         preparation: item.preparation ? clone(item.preparation) : null,
       });
-      const component = group.components.get(item.component) || { name: item.component, baseVolume: 0, unit: "µL", perWellVolume: Number(item.perWellVolume) || 0, perPlate: [] };
+      const component = group.components.get(item.component) || { name: item.component, baseVolume: 0, unit: "µL", perWellVolume: Number(item.perWellVolume) || 0, transferMode: item.transferMode, perPlate: [] };
       const volume = base * factor;
       component.baseVolume += volume;
       component.perPlate.push({ plateId: item.plateId, volume });
@@ -414,7 +414,9 @@
             ...component,
             preparedVolume,
             containerCount: Number.isFinite(maxContainerVolume) && maxContainerVolume > 0 ? Math.max(1, Math.ceil(preparedVolume / maxContainerVolume)) : 1,
-            warning: (component.perWellVolume > 0 && component.perWellVolume < minPipetteVolume) || component.perPlate.some((item) => item.volume < minPipetteVolume)
+            warning: (component.transferMode === "batch"
+              ? preparedVolume > 0 && preparedVolume < minPipetteVolume
+              : (component.perWellVolume > 0 && component.perWellVolume < minPipetteVolume) || component.perPlate.some((item) => item.volume < minPipetteVolume))
               ? "below-minimum-pipette-volume"
               : "",
           };

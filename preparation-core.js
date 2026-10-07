@@ -61,7 +61,7 @@
       return group.components.filter(c => c.premix).map(component => ({
         module: 'reaction', groupKey, mergeScope: input.mergeCompatible === true ? 'project' : 'plate', groupLabel: group.label, groupName: group.label, planName: 'Master Mix',
         plateId: scope.plateId, plateName: scope.plateName, scopeWellIds: group.wellIds,
-        component: component.name, baseVolume: component.perWellUL * group.wellIds.length, perWellVolume: component.perWellUL, unit: 'µL', displayOrder: index,
+        component: component.name, baseVolume: component.perWellUL * group.wellIds.length, perWellVolume: component.perWellUL, transferMode: 'batch', unit: 'µL', displayOrder: index,
         preparation: group.preparation,
       }));
     });
@@ -90,7 +90,7 @@
     const contributions = valid ? groups.flatMap((group, index) => group.components.map(component => ({
       module: 'normalization', groupKey: `normalization:${group.wellIds[0]}`, mergeScope: 'plate', groupLabel: group.label,
       groupName: group.label, planName: 'Normalization', plateId: scope.plateId, plateName: scope.plateName,
-      scopeWellIds: group.wellIds, component: component.name, baseVolume: component.perWellUL, perWellVolume: component.perWellUL,
+      scopeWellIds: group.wellIds, component: component.name, baseVolume: component.perWellUL, perWellVolume: component.perWellUL, transferMode: 'per-well',
       unit: 'µL', displayOrder: index, overagePolicy: 'none', preparation: { kind: 'normalization', finalVolumeUL, separate: [] },
     }))) : [];
     return { version: VERSION, kind: 'normalization', status: valid ? 'valid' : 'partial', groups, samples, contributions, overagePercent: 0 };
@@ -122,7 +122,7 @@
     // Routine dilution remains plate-local unless a complete material identity is provided.
     const contributions = components.filter(c => !c.existing).map(c => ({ module: 'dilution', groupKey: 'dilution', mergeScope: 'plate', groupLabel: stockName, groupName: stockName,
       plateId: scope.plateId, plateName: scope.plateName, scopeWellIds: group.wellIds, planName: 'Dilution',
-      component: c.name, baseVolume: c.perWellUL * count, perWellVolume: input.volumeMode === 'total' ? 0 : c.perWellUL, unit: 'µL',
+      component: c.name, baseVolume: c.perWellUL * count, perWellVolume: input.volumeMode === 'total' ? 0 : c.perWellUL, transferMode: adding && input.volumeMode !== 'total' ? 'per-well' : 'batch', unit: 'µL',
       preparation: group.preparation,
     }));
     return { version: VERSION, kind:'dilution', mode:input.mode, volumeMode:input.volumeMode, status:'valid', groups:[group], contributions, overagePercent, perWell:{ stockUL:plan.sample, diluentUL:plan.diluent, finalUL:plan.final } };

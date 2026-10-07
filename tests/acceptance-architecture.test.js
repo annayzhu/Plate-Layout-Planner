@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 test("acceptance registry exposes independently runnable domain journeys", async () => {
   const { JOURNEYS } = await import("../scripts/acceptance/runner.mjs");
   assert.deepEqual(Object.keys(JOURNEYS), [
+    "preparation",
     "comprehensive",
     "plate-layout",
     "liquid-plan-lifecycle",

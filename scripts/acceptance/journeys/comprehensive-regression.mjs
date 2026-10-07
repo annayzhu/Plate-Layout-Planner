@@ -298,7 +298,8 @@ try {
   await page.locator('#liquidActiveForm [name="calculationType"]').selectOption("dilution");
   await page.locator('#liquidActiveForm button[type="submit"]').click();
   basicResultText = await page.locator("#liquidResultHost").innerText();
-  if (!basicResultText.includes("110 µL") || !basicResultText.includes("10,890 µL")) throw new Error(`Routine dilution regression result is incorrect: ${basicResultText}`);
+  const dilutionVolumes = await page.locator('#liquidResultHost tbody tr').evaluateAll(rows => rows.map(row => Number(row.cells[4].textContent.replaceAll(',', ''))));
+  if (dilutionVolumes.length !== 2 || Math.abs(dilutionVolumes[0] - 110) > 1e-9 || Math.abs(dilutionVolumes[1] - 10890) > 1e-9 || !basicResultText.includes('µL')) throw new Error(`Routine dilution regression result is incorrect: ${basicResultText}`);
   await page.locator('#liquidActiveForm [name="stockConcentration"]').fill("77");
   await page.locator('#liquidActiveForm [data-liquid-action="reset"]').click();
   if ((await page.locator('#liquidActiveForm [name="stockConcentration"]').inputValue()) !== "10") throw new Error("Reset did not restore the active stock-dilution task.");

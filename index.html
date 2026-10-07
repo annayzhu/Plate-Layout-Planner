@@ -7,7 +7,7 @@
     <meta name="description" content="纯浏览器本地运行的 6、12、24、96、384 孔板布局、标签与批量计算工具。" />
     <title>Plate Layout Planner · 孔板布局规划工具</title>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230f625d'/%3E%3Cg fill='%23fff'%3E%3Ccircle cx='10' cy='10' r='3'/%3E%3Ccircle cx='22' cy='10' r='3'/%3E%3Ccircle cx='10' cy='22' r='3'/%3E%3Ccircle cx='22' cy='22' r='3'/%3E%3C/g%3E%3C/svg%3E" />
-    <link rel="stylesheet" href="styles.css?v=20260915-38" />
+    <link rel="stylesheet" href="styles.css?v=20261008-42" />
   </head>
   <body>
     <header class="topbar">
@@ -198,6 +198,8 @@
               <button class="liquid-module-launch" type="button" data-liquid-module="transfection"><span>02</span><strong>转染体系配液</strong><small>siRNA、质粒与多管 Mix</small></button>
               <button class="liquid-module-launch" type="button" data-liquid-module="serial"><span>03</span><strong>连续梯度稀释</strong><small>直接或逐级稀释</small></button>
               <button class="liquid-module-launch" type="button" data-liquid-module="drug"><span>04</span><strong>药物浓度梯度</strong><small>配液、预览与排板</small></button>
+              <button class="liquid-module-launch" type="button" data-liquid-module="reaction"><span>05</span><strong>反应配液 · Master Mix</strong><small>自定义组分、预混与独立加样</small></button>
+              <button class="liquid-module-launch" type="button" data-liquid-module="normalization"><span>06</span><strong>批量浓度归一化</strong><small>逐样本稀释到统一浓度</small></button>
             </div>
             <button id="openLiquidCalculatorButton" class="primary-button full" type="button">打开配液计算</button>
             <p class="liquid-card-note">默认余量 10% · 最小可靠移液体积 1 µL · 结果仅保存在当前浏览器</p>
@@ -281,6 +283,8 @@
           <button type="button" data-liquid-module="transfection">转染体系</button>
           <button type="button" data-liquid-module="serial">梯度稀释</button>
           <button type="button" data-liquid-module="drug">药物排板</button>
+          <button type="button" data-liquid-module="reaction">Master Mix</button>
+          <button type="button" data-liquid-module="normalization">浓度归一化</button>
         </nav>
         <div id="liquidDrawerContent" class="liquid-drawer-content"></div>
       </section>
@@ -339,8 +343,12 @@
     <script src="color-core.js?v=20260823-15"></script>
     <script src="liquid-core.js?v=20260823-15"></script>
     <script src="liquid-plan-core.js?v=20260823-28"></script>
-    <script src="workspace-core.js?v=20260915-38"></script>
+    <script src="workspace-core.js?v=20261008-42"></script>
     <script src="xlsx-core.js?v=20260822-1"></script>
-    <script src="app.js?v=20260915-38"></script>
+    <script src="vendor/preparation-kernel.js?v=20261008-42"></script>
+    <script src="preparation-core.js?v=20261008-42"></script>
+    <script src="preparation-ui.js?v=20261008-42"></script>
+    <!-- host-integration -->
+    <script src="app.js?v=20261008-42"></script>
   </body>
 </html>

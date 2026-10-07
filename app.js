@@ -13,6 +13,8 @@
   if (!Workspace) throw new Error("WorkspaceCore failed to load.");
   const Xlsx = window.XlsxCore;
   if (!Xlsx) throw new Error("XlsxCore failed to load.");
+  const Preparation = window.PreparationCore;
+  const preparationUI = () => window.PreparationUI.create(language);
 
   const STORAGE_KEY = "plate-layout-studio:project:v1";
   const WORKSPACE_STORAGE_KEY = "plate-layout-studio:workspace:v2";
@@ -188,16 +190,20 @@
       : "以下顺序就是导出表中的结果列顺序。";
     const liquidCardLabels = language === "en"
       ? [
-          ["Routine solution", "C1V1 and target concentration"],
+          ["Routine preparation", "Dilution, fixed ratios and weighing"],
           ["Transfection mix", "siRNA, plasmid, and premix tubes"],
           ["Serial dilution", "Direct or stepwise dilution"],
           ["Drug concentration gradient", "Preparation, preview, and layout"],
+          ["Reaction · Master Mix", "Components, premix and separate samples"],
+          ["Batch normalization", "Sample-specific dilution"],
         ]
       : [
-          ["基础常规配液", "C1V1 与目标浓度配液"],
+          ["常规配液", "稀释、比例添加与称量"],
           ["转染体系配液", "siRNA、质粒与多管 Mix"],
           ["连续梯度稀释", "直接或逐级稀释"],
           ["药物浓度梯度", "配液、预览与排板"],
+          ["反应配液 · Master Mix", "自定义组分、预混与独立加样"],
+          ["批量浓度归一化", "逐样本稀释到统一浓度"],
         ];
     document.querySelectorAll(".liquid-module-launch").forEach((button, index) => {
       button.querySelector("strong").textContent = liquidCardLabels[index][0];
@@ -991,7 +997,7 @@
       `<input name="fixedReagentsJson" type="hidden" value="${defaultReagents}"><div class="liquid-subsection wide" data-basic-task="fixed"><strong>${bilingual("需要加入的试剂", "Reagents to add")}</strong><small>${bilingual("示例仅用于说明输入方式，不代表通用实验推荐。", "The example only demonstrates the input format and is not a universal protocol recommendation.")}</small><div class="fixed-reagent-list" data-fixed-reagent-list></div><button class="secondary-button" data-liquid-action="add-fixed-reagent" type="button">＋ ${bilingual("添加试剂", "Add reagent")}</button></div>` +
       `<label data-basic-task="fixed"><span>${bilingual("最小可靠移液体积", "Minimum reliable pipetting volume")}</span><div class="liquid-inline-input"><input name="minimumPipetteVolume" type="number" min="0" step="any" value="1"><select disabled><option>µL</option></select></div></label>` +
       `<label data-basic-task="fixed"><span>${bilingual("小体积工作液", "Small-volume working solution")}</span><select name="workingSolutionMode"><option value="suggest">${bilingual("仅建议，不改变结果", "Suggest only")}</option><option value="apply">${bilingual("申请应用（需再次确认）", "Request application (second confirmation required)")}</option></select></label><input name="workingSolutionConfirmed" type="hidden" value="no">` +
-      `<label data-basic-task="fixed"><span>${bilingual("额外多配百分比", "Extra volume percentage")}</span><div class="liquid-inline-input"><input name="fixedOveragePercent" type="number" min="0" step="any" value="10"><select disabled><option>%</option></select></div></label>` +
+      `<label data-basic-task="fixed"><span>${bilingual("额外多配百分比", "Extra volume percentage")}</span><div class="liquid-inline-input"><input name="fixedOveragePercent" type="number" min="0" step="any" value="10"><select disabled><option>%</option></select></div></label>` + preparationUI().dilutionFields() +
       `<label data-basic-task="dilution"><span>${bilingual("浓度类型", "Concentration type")}</span><select name="kind"><option value="molar">${bilingual("摩尔浓度（如 µM）", "Molar concentration (e.g. µM)")}</option><option value="mass">${bilingual("质量浓度（如 ng/µL）", "Mass concentration (e.g. ng/µL)")}</option><option data-percent-kind value="percent-vv">% v/v</option><option data-percent-kind value="percent-wv">% w/v</option></select></label>` +
       `<label data-basic-task="dilution"><span>${bilingual("我手里的母液浓度", "Stock concentration I have")}</span><div class="liquid-inline-input"><input name="stockConcentration" type="number" min="0" step="any" value="10"><select name="stockUnit">${liquidUnitOptions(["nM","µM","mM","M"], "mM")}</select></div></label>` +
       `<label data-basic-task="dilution"><span>${bilingual("我需要的工作液浓度", "Working concentration I need")}</span><div class="liquid-inline-input"><input name="targetConcentration" type="number" min="0" step="any" value="100"><select name="targetUnit">${liquidUnitOptions(["nM","µM","mM","M"], "µM")}</select></div></label>` +
@@ -1168,7 +1174,9 @@
 
   function liquidModuleDefinition(module) {
     return {
-      basic: { markup: basicLiquidMarkup, updateNames: ["calculationType", "kind", "solidKind", "volumeMode", "fixedMeaning", "fixedVolumeMode"], update: updateBasicFormControls, calculate: calculateBasicLiquid },
+      basic: { markup: basicLiquidMarkup, updateNames: ["calculationType", "kind", "solidKind", "volumeMode", "fixedMeaning", "fixedVolumeMode", "dilutionMode"], update: updateBasicFormControls, calculate: calculateBasicLiquid },
+      reaction: { markup: () => preparationMarkup("reaction"), updateNames: [], calculate: values => calculatePreparation("reaction", values) },
+      normalization: { markup: () => preparationMarkup("normalization"), updateNames: [], calculate: values => calculatePreparation("normalization", values) },
       transfection: { markup: transfectionLiquidMarkup, updateNames: ["preset", "optimizationEnabled", "platePresetAction", "direction", "finalVolume", "complexVolume", "cargoName", "stockConcentration", "stockUnit", "targetValue", "targetUnit", "reagentPerWell", "workingSolutionMode"], update: updateTransfectionFormControls, calculate: calculateTransfectionLiquid },
       serial: { markup: serialLiquidMarkup, updateNames: ["method"], update: updateSerialFormControls, calculate: calculateSerialLiquid },
       drug: { markup: drugLiquidMarkup, updateNames: [], update: null, calculate: calculateDrugLiquid },
@@ -1176,8 +1184,9 @@
   }
 
   function renderLiquidModule(module = activeLiquidModule, { captureCurrent = true } = {}) {
+    window.LabNestPlateBridge?.reset();
     if (captureCurrent && document.getElementById("liquidActiveForm")) captureLiquidDraft(activeLiquidModule);
-    activeLiquidModule = ["basic", "transfection", "serial", "drug"].includes(module) ? module : "basic";
+    activeLiquidModule = liquidModuleDefinition(module) ? module : "basic";
     lastLiquidResult = null;
     pendingDrugLayout = null;
     pendingSerialLayout = null;
@@ -1185,6 +1194,43 @@
     const markup = liquidModuleDefinition(activeLiquidModule).markup();
     elements.liquidDrawerContent.innerHTML = markup;
     restoreLiquidDraft(document.getElementById("liquidActiveForm"), activeLiquidModule);
+    preparationUI().mount(document.getElementById("liquidActiveForm"), invalidatePreparation);
+  }
+
+  function preparationScope(groupDimension = "") {
+    return { plateId: project.id, plateName: project.name,
+      dimensions: project.dimensions.map(d => ({ id: d.id, label: dimensionLabel(d) })),
+      wells: liquidTargetWellIds().map(id => ({ id,
+        sample: currentWells()[id]?.params?.sample || "",
+        group: groupDimension ? String(currentWells()[id]?.params?.[groupDimension] || bilingual("未分组", "Ungrouped")) : "Master Mix",
+      })),
+    };
+  }
+
+  function preparationMarkup(kind) {
+    return liquidWorkspace(kind === "reaction" ? "Master Mix" : bilingual("批量浓度归一化", "Batch normalization"),
+      bilingual("孔位确定数量；计算、保存和导出使用同一份配液结果。", "Wells determine counts; one preparation result powers saving and exports."),
+      preparationUI().fields(kind, liquidDrafts[kind] || {}, preparationScope()),
+      bilingual("先计算，确认后保存到项目；不会自动修改孔参数。", "Calculate first, then save to project. Well parameters are not overwritten.")).replace('class="liquid-workspace"', 'class="liquid-workspace preparation-workspace"');
+  }
+
+  function invalidatePreparation(message) {
+    if (!message && !lastLiquidResult?.structuredPreparation) return;
+    lastLiquidResult = null;
+    const host = document.getElementById("liquidResultHost");
+    if (host) host.innerHTML = `<div class="liquid-result-empty">${escapeHtml(message || bilingual("参数已改变，请重新计算后保存。已保存方案不受影响。", "Inputs changed; recalculate before saving. The saved plan is unchanged."))}</div>`;
+  }
+
+  function calculatePreparation(kind, values, inputOverride) {
+    const result = Preparation.calculate(kind, inputOverride || preparationUI().input(kind, values), preparationScope(values.groupDimension));
+    const view = preparationUI().presentation(result);
+    const warnings = result.status === "partial" ? [bilingual("有无效样本行，请修正后再保存；本次结果未写入项目。", "Invalid sample rows must be corrected before saving. The project is unchanged.")] : [];
+    renderLiquidResult({ module: activeLiquidModule, input: values, recipeName: kind === "reaction" ? "Master Mix" : kind === "normalization" ? bilingual("浓度归一化", "Normalization") : bilingual("稀释与加药", "Dilution & dosing"),
+      ...view, meta: [bilingual(`${liquidTargetWellIds().length} 个目标孔`, `${liquidTargetWellIds().length} target wells`)], warnings,
+      contributions: result.contributions.map(c => ({ ...c, savedPreparedVolume: c.baseVolume * (c.overagePolicy === "none" ? 1 : 1 + result.overagePercent / 100), planOveragePercent: result.overagePercent })),
+      structuredPreparation: result, canSave: result.status === "valid",
+    });
+    if (result.status !== "valid") document.querySelectorAll('[data-liquid-action="save"], [data-liquid-action="save-preset"]').forEach(button => { button.disabled = true; });
   }
 
   function openLiquidDrawer(module = activeLiquidModule) {
@@ -1196,6 +1242,7 @@
   }
 
   function closeLiquidDrawer() {
+    window.LabNestPlateBridge?.reset();
     captureLiquidDraft(activeLiquidModule);
     elements.liquidDrawer.hidden = true;
     document.body.style.overflow = "";
@@ -1231,7 +1278,7 @@
   }
 
   function liquidOveragePercent(input = {}) {
-    return Number(input.overagePercent ?? input.fixedOveragePercent ?? input.dilutionOveragePercent ?? input.solidOveragePercent ?? 0) || 0;
+    return Number(input.prepOverage ?? input.overagePercent ?? input.fixedOveragePercent ?? input.dilutionOveragePercent ?? input.solidOveragePercent ?? 0) || 0;
   }
 
   function volumeFromCell(value) {
@@ -1363,6 +1410,7 @@
     const transfection = LiquidPlan.buildTransfectionExecutionPlan({ groups, language });
     const otherPreparations = (groups || []).filter((group) => !["cargo", "common"].includes(group.tubeRole)).map((group) => ({
       role: group.tubeRole || "standard",
+      overagePolicy: group.overagePolicy,
       label: LiquidPlan.safeDisplayLabel(group.label),
       cargoIdentity: "",
       components: (group.components || []).map((component) => ({ ...component })),
@@ -1370,8 +1418,7 @@
       wellCount: (group.sources || []).reduce((sum, source) => sum + (source.scopeWellIds || []).length, 0),
       warning: (group.components || []).some((component) => component.warning) ? "below-minimum-pipette-volume" : "",
     })).filter((item) => item.label);
-    const otherSteps = otherPreparations.map((item, index) => ({
-      sequence: transfection.steps.length + index + 1,
+    const otherSteps = otherPreparations.flatMap(item => [{
       phase: "prepare-standard",
       cargoIdentity: "",
       label: item.label,
@@ -1379,7 +1426,20 @@
       action: bilingual(`按配液表准备 ${item.label}。`, `Prepare ${item.label} according to the preparation table.`),
       perWellVolume: 0,
       target: item.sources.map((source) => `${source.plateName || source.plateId}: ${(source.scopeWellIds || []).join(", ")}`).join("；"),
-    }));
+    }, ...item.sources.flatMap(source => {
+      const prep = source.preparation;
+      if (!prep) return [];
+      const common = { phase: "dispense", cargoIdentity: "", label: item.label, sources: [source], target: `${source.plateName}: ${source.scopeWellIds.join(", ")}` };
+      if (prep.addToExistingUL !== null && prep.addToExistingUL !== undefined) {
+        const amount = prep.totalAdditionUL ?? prep.dispenseUL;
+        const scope = prep.totalAdditionUL !== null ? bilingual("本次", "For this batch") : bilingual("每孔", "Per well");
+        return [{ ...common, action: bilingual(`${scope}向已有 ${liquidNumber(prep.addToExistingUL)} µL 液体加入 ${liquidNumber(amount)} µL ${item.label}。已有液体不再添加；余量不进入孔内。`, `${scope}, add ${liquidNumber(amount)} µL ${item.label} to the existing ${liquidNumber(prep.addToExistingUL)} µL. Do not add the existing liquid again or dose preparation overage.`), perWellVolume: prep.dispenseUL }];
+      }
+      return [
+        ...(prep.dispenseUL ? [{ ...common, action: bilingual(`每孔分装 ${liquidNumber(prep.dispenseUL)} µL ${item.label} 预混液。`, `Dispense ${liquidNumber(prep.dispenseUL)} µL ${item.label} premix per well.`), perWellVolume: prep.dispenseUL }] : []),
+        ...(prep.separate || []).map(c => ({ ...common, phase: "separate-sample", action: bilingual(`每孔独立加入 ${c.name} ${liquidNumber(c.perWellUL)} µL；不同样本不得混合。`, `Add ${c.name} ${liquidNumber(c.perWellUL)} µL separately per well; never pool samples.`), perWellVolume: c.perWellUL })),
+      ];
+    })]).map((step,index) => ({ ...step, sequence: transfection.steps.length + index + 1 }));
     return { version: LiquidPlan.EXECUTION_PLAN_VERSION, preparations: [...transfection.preparations, ...otherPreparations], steps: [...transfection.steps, ...otherSteps] };
   }
 
@@ -1539,26 +1599,14 @@
       });
       return;
     }
-    const result = Liquid.calculateDilution({
-      kind: values.kind,
-      stockConcentration: values.stockConcentration,
-      stockUnit: values.stockUnit,
-      targetConcentration: values.targetConcentration,
-      targetUnit: values.targetUnit,
-      totalVolume: values.volumeMode === "total" ? values.totalVolume : undefined,
-      volumeUnit: values.volumeUnit,
-      perWellVolume: values.volumeMode === "per-well" ? values.perWellVolume : undefined,
-      perWellUnit: values.perWellUnit,
-      wellCount: values.dilutionWellCount,
-      overagePercent: values.dilutionOveragePercent,
-    });
-    renderLiquidResult({
-      module: "basic", input: values,
-      meta: [bilingual(`实际配制 ${liquidNumber(result.preparedVolumeUL)} µL`, `Prepare ${liquidNumber(result.preparedVolumeUL)} µL`), bilingual(`余量 ${result.overagePercent}%`, `${result.overagePercent}% overage`)],
-      headers: [bilingual("组分", "Component"), bilingual("体积", "Volume")],
-      rows: [[bilingual("母液", "Stock"), `${liquidNumber(result.stockVolumeUL)} µL`], [bilingual("稀释液", "Diluent"), `${liquidNumber(result.diluentVolumeUL)} µL`], [bilingual("合计", "Total"), `${liquidNumber(result.preparedVolumeUL)} µL`]],
-      warnings: result.stockVolumeUL > 0 && result.stockVolumeUL < 1 ? [bilingual("母液移取体积低于默认 1 µL 阈值；建议先配制中间工作液。", "Stock transfer is below the default 1 µL threshold; prepare an intermediate working solution.")] : [],
-      checklist: [bilingual("确认浓度类型与单位一致。", "Confirm concentration type and units."), bilingual(`移取 ${liquidNumber(result.stockVolumeUL)} µL 母液。`, `Transfer ${liquidNumber(result.stockVolumeUL)} µL stock.`), bilingual(`加入 ${liquidNumber(result.diluentVolumeUL)} µL 稀释液并混匀。`, `Add ${liquidNumber(result.diluentVolumeUL)} µL diluent and mix.`)],
+    calculatePreparation("dilution", values, {
+      mode: values.dilutionMode || "final", stock: values.stockConcentration, target: values.targetConcentration,
+      stockUnit: values.stockUnit, targetUnit: values.targetUnit, initial: values.initialConcentration || "0",
+      volumeMode: values.volumeMode, volume: values.volumeMode === "total" ? values.totalVolume : values.perWellVolume,
+      volumeUnit: values.volumeMode === "total" ? values.volumeUnit : values.perWellUnit,
+      stockFold: values.stockFold, targetFold: values.targetFold, ratio: values.dilutionRatio,
+      stockParts: values.stockParts, diluentParts: values.diluentParts, overagePercent: values.dilutionOveragePercent,
+      stockName: values.dilutionStockName || "Stock", diluent: values.dilutionDiluent || "Medium",
     });
   }
 
@@ -1863,7 +1911,7 @@
 
   function liquidRowsForResult(result) {
     if (result?.executionPlan?.preparations?.length) return operatorSummaryRows({ executionPlan: result.executionPlan, overagePercent: liquidOveragePercent(result.input) });
-    return [result.headers, ...(result.rows || [])];
+    return [result.headers, ...(result.rows || []), ...(result.structuredPreparation ? [[], [bilingual("执行说明", "Instructions")], ...(result.checklist || []).map(step => [step])] : [])];
   }
 
   function updateSelectionVisuals(refreshEditor = true) {
@@ -2681,6 +2729,11 @@
     if (plan?.id !== row.dataset.savedLiquidPlan) return;
     if (actionButton.dataset.liquidPlanAction === "edit") {
       editingLiquidPlanId = plan.id;
+      selection = new Set((plan.scopeWellIds || []).filter(id => Core.makeWellIds(project.plateSize).includes(id)));
+      if (plan.module === "calculator" && window.LabNestPlateBridge) {
+        window.LabNestPlateBridge.edit(plan);
+        return;
+      }
       liquidDrafts[plan.module] = { ...(plan.input || {}) };
       openLiquidDrawer(plan.module);
       showToast(bilingual("已载入方案；重新计算并保存会更新原条目", "Plan loaded; recalculate and save to update this entry"));
@@ -2826,6 +2879,10 @@
     const task = form.elements.calculationType.value;
     form.querySelectorAll("[data-basic-task]").forEach((element) => { element.hidden = element.dataset.basicTask !== task; });
     form.querySelectorAll("[data-volume-mode]").forEach((element) => { element.hidden = task !== "dilution" || element.dataset.volumeMode !== form.elements.volumeMode.value; });
+    const dilutionMode = form.elements.dilutionMode.value;
+    form.querySelectorAll("[data-dilution-modes]").forEach(element => { element.hidden = task !== "dilution" || !element.dataset.dilutionModes.split(" ").includes(dilutionMode); });
+    for (const key of ["kind", "stockConcentration", "targetConcentration"]) form.elements[key].closest("label").hidden = task !== "dilution" || !["final", "add"].includes(dilutionMode);
+    for (const key of ["totalVolume", "perWellVolume"]) form.elements[key].closest("label").querySelector("span").textContent = dilutionMode === "add" ? bilingual("加药前已有液体体积", "Existing liquid volume before addition") : key === "totalVolume" ? bilingual("工作液总量", "Working-solution total") : bilingual("每孔需要多少工作液", "Working solution per well");
     form.querySelectorAll("[data-fixed-scope]").forEach((element) => { element.hidden = task !== "fixed" || element.dataset.fixedScope !== form.elements.fixedVolumeMode.value; });
     form.querySelector("[data-molecular-weight]").hidden = task !== "solid" || form.elements.solidKind.value !== "molar";
     const fixedBaseLabel = form.querySelector("[data-fixed-base-label]");
@@ -2947,6 +3004,7 @@
   elements.liquidDrawerContent.addEventListener("change", (event) => {
     const form = event.target.closest("#liquidActiveForm");
     if (!form) return;
+    invalidatePreparation();
     if (activeLiquidModule === "basic" && form.elements.calculationType.value === "fixed" && form.elements.workingSolutionConfirmed) form.elements.workingSolutionConfirmed.value = "no";
     const definition = liquidModuleDefinition(activeLiquidModule);
     if (definition.update && definition.updateNames.includes(event.target.name)) definition.update(form);
@@ -2954,6 +3012,7 @@
 
   elements.liquidDrawerContent.addEventListener("input", (event) => {
     const form = event.target.closest("#liquidActiveForm");
+    if (form) invalidatePreparation();
     if (activeLiquidModule === "basic" && form?.elements.calculationType.value === "fixed" && form.elements.workingSolutionConfirmed) form.elements.workingSolutionConfirmed.value = "no";
     if (form && event.target.closest("[data-fixed-reagent-row]")) syncFixedReagentRows(form);
     if (activeLiquidModule === "transfection" && form) {
@@ -2976,7 +3035,7 @@
       const incoming = Array.isArray(parsed) ? parsed : parsed.recipes;
       if (!Array.isArray(incoming)) throw new Error(bilingual("JSON 中没有 recipes 数组。", "The JSON does not contain a recipes array."));
       const current = readLiquidRecipeLibrary();
-      const imported = incoming.filter((item) => item && ["basic", "transfection", "serial", "drug"].includes(item.module) && item.input && typeof item.input === "object").map((item) => ({ ...item, id: `recipe_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`, builtIn: false, name: String(item.name || item.module).slice(0, 80) }));
+      const imported = incoming.filter((item) => item && liquidModuleDefinition(item.module) && item.input && typeof item.input === "object").map((item) => ({ ...item, id: `recipe_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`, builtIn: false, name: String(item.name || item.module).slice(0, 80) }));
       writeLiquidRecipeLibrary([...current, ...imported]);
       renderLiquidModule(activeLiquidModule);
       showToast(bilingual(`已导入 ${imported.length} 个配方`, `Imported ${imported.length} recipes`));
@@ -2991,10 +3050,11 @@
     event.preventDefault();
     try {
       if (activeLiquidModule === "basic") syncFixedReagentRows(form);
+      preparationUI().sync(form);
       const values = formValues(form);
       liquidModuleDefinition(activeLiquidModule).calculate(values);
     } catch (error) {
-      console.error(error);
+      lastLiquidResult = null;
       const host = document.getElementById("liquidResultHost");
       if (host) host.innerHTML = `<div class="liquid-warning">${escapeHtml(bilingual(`无法计算：${error.message}`, `Could not calculate: ${error.message}`))}</div>`;
     }
@@ -3009,7 +3069,7 @@
         const form = document.getElementById("liquidActiveForm");
         captureLiquidDraft("basic");
         const task = form.elements.calculationType.value;
-        const prefixes = task === "fixed" ? ["fixed", "minimumPipetteVolume", "workingSolutionMode"] : task === "dilution" ? ["kind", "stock", "target", "volumeMode", "totalVolume", "volumeUnit", "perWell", "dilutionWellCount"] : ["solid", "purityPercent", "molecularWeight"];
+        const prefixes = task === "fixed" ? ["fixed", "minimumPipetteVolume", "workingSolutionMode"] : task === "dilution" ? ["kind", "stock", "target", "volumeMode", "totalVolume", "volumeUnit", "perWell", "dilution", "initialConcentration", "diluentParts"] : ["solid", "purityPercent", "molecularWeight"];
         for (const name of Object.keys(liquidDrafts.basic || {})) if (prefixes.some((prefix) => name === prefix || name.startsWith(prefix))) delete liquidDrafts.basic[name];
         liquidDrafts.basic.calculationType = task;
       } else delete liquidDrafts[activeLiquidModule];
@@ -3085,6 +3145,7 @@
       return;
     }
     if (!lastLiquidResult) return;
+    if (["save", "save-preset"].includes(action) && lastLiquidResult.canSave === false) return;
     if (action === "copy") {
       try {
         await navigator.clipboard.writeText(liquidTableText(lastLiquidResult));
@@ -3110,7 +3171,7 @@
     const saved = {
       id: existingPlan?.id || `liquid_${Date.now().toString(36)}`,
       module: activeLiquidModule,
-      name: existingPlan?.name || automaticName,
+      name: existingPlan?.module === activeLiquidModule ? existingPlan.name : automaticName,
       recipeName,
       plateId: project.id,
       plateName: project.name,
@@ -3118,7 +3179,7 @@
       executionPlanVersion: activeLiquidModule === "transfection" ? LiquidPlan.EXECUTION_PLAN_VERSION : undefined,
       scopeWellIds: liquidTargetWellIds(),
       input: savedInput,
-      resultSnapshot: { headers: lastLiquidResult.headers, rows: lastLiquidResult.rows, warnings: lastLiquidResult.warnings || [], checklist: lastLiquidResult.checklist || [], executionGroups: lastLiquidResult.executionGroups || [] },
+      resultSnapshot: { headers: lastLiquidResult.headers, rows: lastLiquidResult.rows, warnings: lastLiquidResult.warnings || [], checklist: lastLiquidResult.checklist || [], executionGroups: lastLiquidResult.executionGroups || [], structuredPreparation: lastLiquidResult.structuredPreparation },
       executionPlanSnapshot: lastLiquidResult.executionPlan ? JSON.parse(JSON.stringify(lastLiquidResult.executionPlan)) : undefined,
       protocolSnapshot: { steps: lastLiquidResult.checklist || [] },
       contributions: liquidResultContributions(lastLiquidResult, project),
@@ -3253,7 +3314,7 @@
         component.perWellVolume ? `${liquidNumber(component.perWellVolume)} µL` : "",
         preparation.wellCount,
         `${liquidNumber(component.baseVolume)} µL`,
-        `${summary.overagePercent}%`,
+        preparation.overagePolicy === "none" ? bilingual("不加余量", "No overage") : `${summary.overagePercent}%`,
         `${liquidNumber(component.preparedVolume)} µL`,
         plates,
         wells,
@@ -3274,6 +3335,8 @@
       "add-complex": bilingual("加入复合物", "Add complex"),
       "add-cells": bilingual("加入细胞悬液", "Add cell suspension"),
       "prepare-standard": bilingual("准备其他配液", "Prepare other solution"),
+      "dispense": bilingual("分装预混液", "Dispense premix"),
+      "separate-sample": bilingual("独立加样", "Add samples separately"),
     };
     const rows = [[bilingual("执行顺序", "Step"), bilingual("阶段", "Phase"), bilingual("操作", "Action"), bilingual("目的物/分组", "Cargo / group"), bilingual("目标板", "Target plate"), bilingual("目标孔", "Target well"), bilingual("每孔操作体积", "Action volume per well"), bilingual("实际加入量", "Actual volume"), bilingual("完成状态", "Done"), bilingual("操作者", "Operator"), bilingual("时间", "Time"), bilingual("备注", "Notes")]];
     for (const step of summary?.executionPlan?.steps || []) {
@@ -3310,6 +3373,7 @@
       { name: bilingual("跨板公共液", "Cross-plate common mixes"), systemKind: "liquid-common", rows: summaryRowsForExport(summary, "common"), freezeRows: 1, autoFilter: true },
       { name: bilingual("逐步执行清单", "Execution checklist"), systemKind: "pipetting", rows: pipettingRowsForSummary(summary), freezeRows: 1, autoFilter: true },
     ];
+    if (summary.executionPlan.preparations.some(item => item.role === "standard")) sheets.push({ name: bilingual("反应与常规配液", "Reaction and routine"), systemKind: "liquid-standard", rows: summaryRowsForExport(summary, "standard"), freezeRows: 1, autoFilter: true });
     if (summary.compatibilityWarnings?.length) sheets.push({ name: bilingual("未合并说明", "Merge explanations"), systemKind: "liquid-compatibility", rows: [[bilingual("配液", "Preparation"), bilingual("原因", "Reason")], ...summary.compatibilityWarnings.map((warning) => [warning.split("：")[0], warning.split("：").slice(1).join("：")])], freezeRows: 1 });
     return sheets;
   }
@@ -3354,6 +3418,11 @@
       sheets.push({ name: `${plate.name}-${bilingual("配液", "liquid")}`, systemKind: "plate-liquid", rows: preparationRows, freezeRows: 1, autoFilter: true });
       const executionRows = [];
       for (const plan of [Workspace.usableLiquidPlan(plate)].filter(Boolean)) {
+        if (plan.resultSnapshot?.structuredPreparation) {
+          executionRows.push([bilingual("方案", "Plan"), plan.name], plan.resultSnapshot.headers, ...plan.resultSnapshot.rows,
+            [], [bilingual("操作步骤", "Instructions")], ...(plan.protocolSnapshot?.steps || []).map(step => [step]));
+          continue;
+        }
         if (plan.module !== "transfection") continue;
         executionRows.push([bilingual("方案", "Plan"), plan.name || plan.recipeName || plan.module]);
         if (plan.executionPlanVersion === LiquidPlan.EXECUTION_PLAN_VERSION && plan.executionPlanSnapshot?.preparations?.length) {
@@ -3742,6 +3811,31 @@
     }
   });
 
+  // LabNest owns its extra calculator UI; the independent planner owns persistence.
+  window.LabNestPlateBridge?.connect({
+    context: () => ({ workspaceId: workspace.id, plateId: project.id, plateName: project.name, plateSize: project.plateSize, wellIds: liquidTargetWellIds(), locale: language }),
+    snapshot,
+    open(frame) { openLiquidDrawer(); elements.liquidDrawerContent.replaceChildren(frame); },
+    notify: showToast,
+    publish(plan, mappings) {
+      commit(() => {
+        for (const [index, mapping] of mappings.entries()) {
+          const id = `calculator_${Date.now().toString(36)}_${index}`;
+          project.dimensions.push({ id, name: nextAvailableDimensionName(mapping.name), type: "number", unit: mapping.unit });
+          plan.scopeWellIds.forEach((wellId, i) => {
+            const wells = currentWells();
+            if (!wells[wellId]) wells[wellId] = { params: {} };
+            wells[wellId].params[id] = mapping.values[i];
+          });
+        }
+        Object.assign(project, Workspace.publishLiquidPlan(project, plan));
+        workspace.latestLiquidSummary = null;
+      }, { invalidateLiquid: false });
+      renderAll();
+      closeLiquidDrawer();
+      showToast(bilingual("已更新当前板方案", "Current plate plan updated"));
+    },
+  });
   renderAll();
   initializeIndexedStorage().finally(consumeLiquidPlanMigrationNotices);
 })();

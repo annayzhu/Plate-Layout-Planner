@@ -635,6 +635,26 @@ label > span { display: block; margin-bottom: 5px; color: var(--muted); font-siz
 .liquid-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
 .liquid-form-grid label { display: grid; align-content: start; gap: 4px; min-width: 0; color: var(--ink-soft); font-size: var(--type-caption); font-weight: 760; }
 .liquid-form-grid label.wide { grid-column: 1 / -1; }
+.liquid-form-grid > .wide { grid-column: 1 / -1; min-width: 0; }
+.prep-help { font-size: var(--type-caption); line-height: 1.55; color: var(--muted); }
+.prep-rows { display: grid; gap: 8px; }
+.liquid-workspace.preparation-workspace { grid-template-columns: minmax(0,1fr); }
+.prep-component { display: grid; grid-template-columns: minmax(100px,1.2fr) minmax(110px,1fr) 85px auto 28px; gap: 8px; align-items: end; padding: 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-strong); }
+.prep-concentrations { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.prep-component [hidden] { display: none; }
+.liquid-form-grid .prep-check { display: flex; align-items: center; gap: 5px; min-height: 38px; white-space: nowrap; }
+.liquid-form-grid .prep-check input { width: 16px; height: 16px; min-height: 16px; margin: 0; padding: 0; accent-color: var(--accent); }
+.prep-remove { justify-self: end; align-self: end; color: var(--danger); border-color: var(--line); width: 28px; height: 38px; }
+.prep-samples { max-height: 320px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; }
+.prep-samples table { width: 100%; border-collapse: collapse; font-size: var(--type-caption); }
+.prep-samples th, .prep-samples td { padding: 5px; text-align: left; }
+.prep-samples thead { position: sticky; top: 0; background: var(--surface-strong); }
+.prep-samples input { width: 100%; min-width: 70px; }
+@media (max-width: 600px) {
+  .prep-component { grid-template-columns: minmax(0,1fr) minmax(0,1fr) 28px; }
+  .prep-remove { grid-column: 3; grid-row: 1; }
+  .prep-component .prep-check { grid-column: 2; }
+}
 .liquid-protocol-editor { grid-column: 1 / -1; }
 .liquid-protocol-editor summary { display: grid; gap: 3px; padding: 4px 0; cursor: pointer; }
 .liquid-protocol-editor summary strong { margin: 0; }

@@ -341,8 +341,10 @@
       const factor = VOLUME_TO_UL[item.unit];
       const base = Number(item.baseVolume);
       if (!factor || !Number.isFinite(base) || base < 0 || !item.groupKey || !item.component) continue;
-      if (!groups.has(item.groupKey)) groups.set(item.groupKey, {
-        key: item.groupKey,
+      // Bind plate-local recipes to the current plate, including cloned plans.
+      const key = item.mergeScope === "plate" ? `${item.plateId}:${item.groupKey}` : item.groupKey;
+      if (!groups.has(key)) groups.set(key, {
+        key,
         label: item.groupLabel || "",
         module: item.module || "",
         executionPlanVersion: item.executionPlanVersion || null,
@@ -352,6 +354,7 @@
         displayOrder: Number.isFinite(Number(item.displayOrder)) ? Number(item.displayOrder) : Number.MAX_SAFE_INTEGER,
         tubeRole: item.tubeRole || "standard",
         tube: item.tube || "",
+        overagePolicy: item.overagePolicy === "none" ? "none" : "shared",
         cargoIdentity: item.cargoIdentity || "",
         recipeNames: new Set(),
         plates: new Map(),
@@ -359,7 +362,7 @@
         components: new Map(),
         warnings: [],
       });
-      const group = groups.get(item.groupKey);
+      const group = groups.get(key);
       if (Number.isFinite(Number(item.displayOrder))) group.displayOrder = Math.min(group.displayOrder, Number(item.displayOrder));
       if (!group.plates.has(item.plateId)) group.plates.set(item.plateId, { plateId: item.plateId, plateName: item.plateName || item.plateId });
       if (item.planName) group.recipeNames.add(item.planName);
@@ -379,6 +382,7 @@
         complexVolumeUL: Number(item.complexVolumeUL) || 0,
         cellMediumVolumeUL: Number(item.cellMediumVolumeUL) || 0,
         incubationMinutes: item.incubationMinutes === null ? null : Number(item.incubationMinutes) || null,
+        preparation: item.preparation ? clone(item.preparation) : null,
       });
       const component = group.components.get(item.component) || { name: item.component, baseVolume: 0, unit: "µL", perWellVolume: Number(item.perWellVolume) || 0, perPlate: [] };
       const volume = base * factor;
@@ -399,12 +403,13 @@
         displayOrder: group.displayOrder,
         tubeRole: group.tubeRole,
         tube: group.tube,
+        overagePolicy: group.overagePolicy,
         cargoIdentity: group.cargoIdentity,
         recipeNames: [...group.recipeNames],
         plates: [...group.plates.values()],
         sources: [...group.sources.values()],
         components: [...group.components.values()].map((component) => {
-          const preparedVolume = component.baseVolume * multiplier;
+          const preparedVolume = component.baseVolume * (group.overagePolicy === "none" ? 1 : multiplier);
           return {
             ...component,
             preparedVolume,

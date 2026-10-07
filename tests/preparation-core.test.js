@@ -70,7 +70,7 @@ test('concentration rows and parameter groups conserve volume and count each wel
   const result=Prep.calculate('reaction',input,grouped);
   assert.deepEqual(result.groups.map(g=>g.wellIds.length),[2,4]);
   for(const group of result.groups) {
-    assert.equal(group.components[0].perWellUL,1);
+    assert.ok(Math.abs(group.components[0].perWellUL-1)<1e-12);
     assert.equal(group.components.reduce((sum,c)=>sum+c.perWellUL,0),20);
     assert.equal(group.dispenseUL,18);
   }

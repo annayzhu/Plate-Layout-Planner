@@ -3430,7 +3430,7 @@
           executionRows.push([bilingual("方案", "Plan"), plan.name], columns, ...table.map(row => columns.map(column => row[column] ?? "")),
             [], [bilingual("操作步骤", "Instructions")], ...(plan.protocolSnapshot?.steps || []).map(step => [step]));
           const operations = plan.resultSnapshot?.operations || [];
-          executionRows.push([], ["Component", "Source", "Destination", "Volume", "Unit", "Repetitions"], ...operations.map(op => [op.component, op.source, op.destination, op.quantity?.value, op.quantity?.unit, op.repetitions]));
+          executionRows.push([], [bilingual("组分", "Component"), bilingual("取液来源", "Source"), bilingual("加入位置", "Destination"), bilingual("体积", "Volume"), bilingual("单位", "Unit"), bilingual("次数", "Repetitions")], ...operations.map(op => [op.component, op.source, op.destination, op.quantity?.value, op.quantity?.unit, op.repetitions]));
           continue;
         }
         if (plan.resultSnapshot?.structuredPreparation) {

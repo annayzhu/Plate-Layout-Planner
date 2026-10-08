@@ -94,7 +94,7 @@
     const current = uniqueCandidates[0] || null;
     const archived = [...(Array.isArray(archivedLiquidPlans) ? archivedLiquidPlans : []), ...uniqueCandidates.slice(1)]
       .map(normalizeLiquidPlan).filter(Boolean);
-    const archivedUnique = [...new Map(archived.filter((plan) => !current || plan.id !== current.id).map((plan, index) => [plan.id || `archived-${index}`, plan])).values()].slice(-30);
+    const archivedUnique = [...new Map(archived.filter((plan) => !current || plan.id !== current.id).map((plan, index) => [plan.id || `archived-${index}`, plan])).values()];
     return { current, archived: archivedUnique, migratedCount: Math.max(0, uniqueCandidates.length - 1) };
   }
 
@@ -124,7 +124,7 @@
 
   function createWorkspace({ name = "未命名项目", plateSize = 24, plateName } = {}) {
     const first = createPlate({ name: plateName || "未命名孔板", plateSize });
-    return { version: 2, name: String(name).slice(0, 80), activePlateId: first.id, plates: [first], latestLiquidSummary: null, migrationNotices: [], updatedAt: new Date().toISOString() };
+    return { version: 2, id: newId("workspace"), name: String(name).slice(0, 80), activePlateId: first.id, plates: [first], latestLiquidSummary: null, migrationNotices: [], updatedAt: new Date().toISOString() };
   }
 
   function hasLegacyContent(raw, size) {
@@ -151,6 +151,7 @@
     plates.forEach((plate) => { delete plate.liquidPlanMigration; });
     return {
       version: 2,
+      id: newId("workspace"),
       name: typeof raw.name === "string" && raw.name.trim() ? raw.name.trim().slice(0, 80) : "未命名项目",
       activePlateId: plates[0].id,
       plates,
@@ -178,6 +179,7 @@
     plates.forEach((plate) => { delete plate.liquidPlanMigration; });
     return {
       version: 2,
+      id: typeof raw.id === "string" && raw.id ? raw.id : newId("workspace"),
       name: typeof raw.name === "string" && raw.name.trim() ? raw.name.trim().slice(0, 80) : "未命名项目",
       activePlateId: plates.some((plate) => plate.id === raw.activePlateId) ? raw.activePlateId : plates[0].id,
       plates,
@@ -374,6 +376,7 @@
         groupName: item.groupName || "",
         scopeWellIds: Array.isArray(item.scopeWellIds) ? [...item.scopeWellIds] : [],
         protocolSteps: Array.isArray(item.protocolSteps) ? [...item.protocolSteps] : [],
+        warnings: Array.isArray(item.warnings) ? [...item.warnings] : [],
         displayOrder: Number.isFinite(Number(item.displayOrder)) ? Number(item.displayOrder) : Number.MAX_SAFE_INTEGER,
         direction: item.direction === "reverse" ? "reverse" : "forward",
         preset: item.preset || "",
@@ -384,11 +387,12 @@
         incubationMinutes: item.incubationMinutes === null ? null : Number(item.incubationMinutes) || null,
         preparation: item.preparation ? clone(item.preparation) : null,
       });
-      const component = group.components.get(item.component) || { name: item.component, baseVolume: 0, unit: "µL", perWellVolume: Number(item.perWellVolume) || 0, transferMode: item.transferMode, perPlate: [] };
+      const componentKey = item.componentKey || item.component;
+      const component = group.components.get(componentKey) || { name: item.component, baseVolume: 0, unit: "µL", perWellVolume: Number(item.perWellVolume) || 0, applyOverage: item.applyOverage !== false, transferMode: item.transferMode, perPlate: [] };
       const volume = base * factor;
       component.baseVolume += volume;
       component.perPlate.push({ plateId: item.plateId, volume });
-      group.components.set(item.component, component);
+      group.components.set(componentKey, component);
     }
     const multiplier = 1 + Math.max(0, Number(overagePercent) || 0) / 100;
     return {
@@ -409,7 +413,7 @@
         plates: [...group.plates.values()],
         sources: [...group.sources.values()],
         components: [...group.components.values()].map((component) => {
-          const preparedVolume = component.baseVolume * (group.overagePolicy === "none" ? 1 : multiplier);
+          const preparedVolume = component.baseVolume * (group.overagePolicy === "none" || !component.applyOverage ? 1 : multiplier);
           return {
             ...component,
             preparedVolume,

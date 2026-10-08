@@ -1435,6 +1435,15 @@
       target: item.sources.map((source) => `${source.plateName || source.plateId}: ${(source.scopeWellIds || []).join(", ")}`).join("；"),
     }, ...item.sources.flatMap(source => {
       const prep = source.preparation;
+      if (!prep && ["premix", "separate"].includes(item.role)) {
+        // Host recipes may be pooled with a new reserve. Never reuse old batch
+        // quantities from their saved prose as instructions for the new batch.
+        const additions = item.role === "premix"
+          ? [{ name: item.label, perWellVolume: item.components.reduce((sum, c) => sum + c.perWellVolume, 0) }]
+          : item.components;
+        return additions.map(component => ({ phase: item.role === "premix" ? "dispense" : "separate-sample", perWellVolume: component.perWellVolume, sources: [source], label: item.label,
+          action: bilingual(`每孔加入 ${liquidNumber(component.perWellVolume)} µL ${component.name}；余量不进入孔内，独立样本不得混合。`, `Add ${liquidNumber(component.perWellVolume)} µL ${component.name} per well; do not dose reserve or pool separate samples.`) }));
+      }
       if (!prep) return (source.protocolSteps || []).map(action => ({ phase: "prepare-standard", action, label: item.label, sources: [source], perWellVolume: 0 }));
       return preparationUI().executionSteps(prep, item.label).map(step => ({
         ...step, cargoIdentity: "", label: item.label,

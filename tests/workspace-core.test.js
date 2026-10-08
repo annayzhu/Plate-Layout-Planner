@@ -3,6 +3,24 @@ const assert = require("node:assert/strict");
 
 const Workspace = require("../workspace-core.js");
 
+test("host calculator workspace identity survives normalization and legacy migration", () => {
+  const workspace = Workspace.createWorkspace();
+  assert.ok(workspace.id);
+  assert.equal(Workspace.normalizeWorkspace(workspace).id, workspace.id);
+  assert.ok(Workspace.normalizeWorkspace({ version: 1, plateSize: 24 }).id);
+});
+
+test("host component identities and separate-sample overage survive aggregation", () => {
+  const rows = [
+    { componentKey: "stock-1", component: "Buffer", baseVolume: 10 },
+    { componentKey: "stock-2", component: "Buffer", baseVolume: 20 },
+    { componentKey: "sample", component: "Template", baseVolume: 2, applyOverage: false },
+  ].map(row => ({ groupKey: "recipe", groupLabel: "Mix", plateId: "p1", unit: "µL", ...row }));
+  const components = Workspace.mergeLiquidContributions(rows, { overagePercent: 10 }).groups[0].components;
+  assert.equal(components.length, 3);
+  assert.deepEqual(components.map(row => row.preparedVolume), [11, 22, 2]);
+});
+
 test("migrates every populated legacy plate format into an independent physical plate", () => {
   const legacy = {
     version: 1,

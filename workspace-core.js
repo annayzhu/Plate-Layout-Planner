@@ -124,7 +124,7 @@
 
   function createWorkspace({ name = "未命名项目", plateSize = 24, plateName } = {}) {
     const first = createPlate({ name: plateName || "未命名孔板", plateSize });
-    return { version: 2, name: String(name).slice(0, 80), activePlateId: first.id, plates: [first], latestLiquidSummary: null, migrationNotices: [], updatedAt: new Date().toISOString() };
+    return { version: 2, id: newId("workspace"), name: String(name).slice(0, 80), activePlateId: first.id, plates: [first], latestLiquidSummary: null, migrationNotices: [], updatedAt: new Date().toISOString() };
   }
 
   function hasLegacyContent(raw, size) {
@@ -151,6 +151,7 @@
     plates.forEach((plate) => { delete plate.liquidPlanMigration; });
     return {
       version: 2,
+      id: newId("workspace"),
       name: typeof raw.name === "string" && raw.name.trim() ? raw.name.trim().slice(0, 80) : "未命名项目",
       activePlateId: plates[0].id,
       plates,
@@ -178,6 +179,7 @@
     plates.forEach((plate) => { delete plate.liquidPlanMigration; });
     return {
       version: 2,
+      id: typeof raw.id === "string" && raw.id ? raw.id : newId("workspace"),
       name: typeof raw.name === "string" && raw.name.trim() ? raw.name.trim().slice(0, 80) : "未命名项目",
       activePlateId: plates.some((plate) => plate.id === raw.activePlateId) ? raw.activePlateId : plates[0].id,
       plates,
@@ -246,6 +248,7 @@
     const plate = createPlate({ ...options, name: uniquePlateName(next, options.name) });
     next.plates.push(plate);
     next.activePlateId = plate.id;
+    next.latestLiquidSummary = null;
     next.updatedAt = new Date().toISOString();
     return next;
   }
@@ -269,6 +272,7 @@
     const index = next.plates.findIndex((item) => item.id === sourceId);
     next.plates.splice(index + 1, 0, plate);
     next.activePlateId = plate.id;
+    next.latestLiquidSummary = null;
     next.updatedAt = new Date().toISOString();
     return next;
   }
@@ -279,6 +283,7 @@
     const target = index + Number(offset);
     if (index < 0 || target < 0 || target >= next.plates.length) return next;
     [next.plates[index], next.plates[target]] = [next.plates[target], next.plates[index]];
+    next.latestLiquidSummary = null;
     next.updatedAt = new Date().toISOString();
     return next;
   }
@@ -289,6 +294,7 @@
     const index = next.plates.findIndex((plate) => plate.id === plateId);
     if (index < 0) return next;
     next.plates.splice(index, 1);
+    next.latestLiquidSummary = null;
     if (next.activePlateId === plateId) next.activePlateId = next.plates[Math.min(index, next.plates.length - 1)].id;
     next.updatedAt = new Date().toISOString();
     return next;
@@ -384,11 +390,12 @@
         incubationMinutes: item.incubationMinutes === null ? null : Number(item.incubationMinutes) || null,
         preparation: item.preparation ? clone(item.preparation) : null,
       });
-      const component = group.components.get(item.component) || { name: item.component, baseVolume: 0, unit: "µL", perWellVolume: Number(item.perWellVolume) || 0, transferMode: item.transferMode, perPlate: [] };
+      const componentKey = item.componentKey || item.component;
+      const component = group.components.get(componentKey) || { name: item.component, baseVolume: 0, unit: "µL", perWellVolume: Number(item.perWellVolume) || 0, applyOverage: item.applyOverage !== false, transferMode: item.transferMode, perPlate: [] };
       const volume = base * factor;
       component.baseVolume += volume;
       component.perPlate.push({ plateId: item.plateId, volume });
-      group.components.set(item.component, component);
+      group.components.set(componentKey, component);
     }
     const multiplier = 1 + Math.max(0, Number(overagePercent) || 0) / 100;
     return {
@@ -409,7 +416,7 @@
         plates: [...group.plates.values()],
         sources: [...group.sources.values()],
         components: [...group.components.values()].map((component) => {
-          const preparedVolume = component.baseVolume * (group.overagePolicy === "none" ? 1 : multiplier);
+          const preparedVolume = component.baseVolume * (group.overagePolicy === "none" || !component.applyOverage ? 1 : multiplier);
           return {
             ...component,
             preparedVolume,

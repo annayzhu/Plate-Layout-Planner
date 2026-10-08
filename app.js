@@ -443,6 +443,7 @@
     }
     history.redo.push(snapshot());
     restoreActivePlate(JSON.parse(history.undo.pop()));
+    workspace.latestLiquidSummary = null;
     selection = new Set();
     selectionAnchor = null;
     saveProject();
@@ -466,6 +467,7 @@
     }
     history.undo.push(snapshot());
     restoreActivePlate(JSON.parse(history.redo.pop()));
+    workspace.latestLiquidSummary = null;
     selection = new Set();
     selectionAnchor = null;
     saveProject();
@@ -1433,7 +1435,7 @@
       target: item.sources.map((source) => `${source.plateName || source.plateId}: ${(source.scopeWellIds || []).join(", ")}`).join("；"),
     }, ...item.sources.flatMap(source => {
       const prep = source.preparation;
-      if (!prep) return [];
+      if (!prep) return (source.protocolSteps || []).map(action => ({ phase: "prepare-standard", action, label: item.label, sources: [source], perWellVolume: 0 }));
       return preparationUI().executionSteps(prep, item.label).map(step => ({
         ...step, cargoIdentity: "", label: item.label,
         sources: [{ ...source, scopeWellIds: step.wellId ? [step.wellId] : source.scopeWellIds }],
@@ -3313,7 +3315,7 @@
         component.perWellVolume ? `${liquidNumber(component.perWellVolume)} µL` : "",
         preparation.wellCount,
         `${liquidNumber(component.baseVolume)} µL`,
-        preparation.overagePolicy === "none" ? bilingual("不加余量", "No overage") : `${summary.overagePercent}%`,
+        preparation.overagePolicy === "none" || component.applyOverage === false ? bilingual("不加余量", "No overage") : `${summary.overagePercent}%`,
         `${liquidNumber(component.preparedVolume)} µL`,
         plates,
         wells,
@@ -3374,6 +3376,9 @@
       { name: bilingual("逐步执行清单", "Execution checklist"), systemKind: "pipetting", rows: pipettingRowsForSummary(summary), freezeRows: 1, autoFilter: true },
     ];
     if (summary.executionPlan.preparations.some(item => item.role === "standard")) sheets.push({ name: bilingual("反应与常规配液", "Reaction and routine"), systemKind: "liquid-standard", rows: summaryRowsForExport(summary, "standard"), freezeRows: 1, autoFilter: true });
+    for (const [role, zh, en] of [["premix", "反应预混液", "Reaction premix"], ["separate", "独立加样", "Separate additions"]]) {
+      if (summary.executionPlan.preparations.some(item => item.role === role)) sheets.push({ name: bilingual(zh, en), systemKind: `liquid-${role}`, rows: summaryRowsForExport(summary, role), freezeRows: 1, autoFilter: true });
+    }
     if (summary.compatibilityWarnings?.length) sheets.push({ name: bilingual("未合并说明", "Merge explanations"), systemKind: "liquid-compatibility", rows: [[bilingual("配液", "Preparation"), bilingual("原因", "Reason")], ...summary.compatibilityWarnings.map((warning) => [warning.split("：")[0], warning.split("：").slice(1).join("：")])], freezeRows: 1 });
     return sheets;
   }
@@ -3418,6 +3423,15 @@
       sheets.push({ name: `${plate.name}-${bilingual("配液", "liquid")}`, systemKind: "plate-liquid", rows: preparationRows, freezeRows: 1, autoFilter: true });
       const executionRows = [];
       for (const plan of [Workspace.usableLiquidPlan(plate)].filter(Boolean)) {
+        if (plan.module === "calculator") {
+          const table = plan.resultSnapshot?.table || [];
+          const columns = [...new Set(table.flatMap(row => Object.keys(row)))];
+          executionRows.push([bilingual("方案", "Plan"), plan.name], columns, ...table.map(row => columns.map(column => row[column] ?? "")),
+            [], [bilingual("操作步骤", "Instructions")], ...(plan.protocolSnapshot?.steps || []).map(step => [step]));
+          const operations = plan.resultSnapshot?.operations || [];
+          executionRows.push([], ["Component", "Source", "Destination", "Volume", "Unit", "Repetitions"], ...operations.map(op => [op.component, op.source, op.destination, op.quantity?.value, op.quantity?.unit, op.repetitions]));
+          continue;
+        }
         if (plan.resultSnapshot?.structuredPreparation) {
           executionRows.push([bilingual("方案", "Plan"), plan.name], plan.resultSnapshot.headers, ...plan.resultSnapshot.rows,
             [], [bilingual("操作步骤", "Instructions")], ...(plan.protocolSnapshot?.steps || []).map(step => [step]));
@@ -3818,7 +3832,9 @@
     open(frame) { openLiquidDrawer(); elements.liquidDrawerContent.replaceChildren(frame); },
     notify: showToast,
     publish(plan, mappings) {
-      commit(() => {
+      commitLiquidPlanChange(() => {
+        const current = Workspace.currentLiquidPlan(project);
+        if (current?.calculatorId === plan.calculatorId) plan.name = current.name;
         for (const [index, mapping] of mappings.entries()) {
           const id = `calculator_${Date.now().toString(36)}_${index}`;
           project.dimensions.push({ id, name: nextAvailableDimensionName(mapping.name), type: "number", unit: mapping.unit });
@@ -3829,8 +3845,10 @@
           });
         }
         Object.assign(project, Workspace.publishLiquidPlan(project, plan));
+        project.calculationLog.push({ at: new Date().toISOString(), calculatorId: plan.calculatorId, targetWellIds: plan.scopeWellIds, rawInputs: plan.input, resultSnapshot: plan.resultSnapshot });
+        project.calculationLog = project.calculationLog.slice(-50);
         workspace.latestLiquidSummary = null;
-      }, { invalidateLiquid: false });
+      });
       renderAll();
       closeLiquidDrawer();
       showToast(bilingual("已更新当前板方案", "Current plate plan updated"));

@@ -2731,8 +2731,9 @@
     if (actionButton.dataset.liquidPlanAction === "edit") {
       editingLiquidPlanId = plan.id;
       selection = new Set((plan.scopeWellIds || []).filter(id => Core.makeWellIds(project.plateSize).includes(id)));
-      if (plan.module === "calculator" && window.LabNestPlateBridge) {
-        window.LabNestPlateBridge.edit(plan);
+      if (plan.module === "calculator") {
+        if (window.LabNestPlateBridge) window.LabNestPlateBridge.edit(plan);
+        else showToast(bilingual("此方案由 LabNest Calculator 创建；请在 LabNest 中编辑。现有结果仍可备份与导出。", "This plan was created in LabNest Calculator. Edit it in LabNest; saved results remain available for backup and export."));
         return;
       }
       liquidDrafts[plan.module] = { ...(plan.input || {}) };

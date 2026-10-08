@@ -248,7 +248,6 @@
     const plate = createPlate({ ...options, name: uniquePlateName(next, options.name) });
     next.plates.push(plate);
     next.activePlateId = plate.id;
-    next.latestLiquidSummary = null;
     next.updatedAt = new Date().toISOString();
     return next;
   }
@@ -272,7 +271,6 @@
     const index = next.plates.findIndex((item) => item.id === sourceId);
     next.plates.splice(index + 1, 0, plate);
     next.activePlateId = plate.id;
-    next.latestLiquidSummary = null;
     next.updatedAt = new Date().toISOString();
     return next;
   }
@@ -283,7 +281,6 @@
     const target = index + Number(offset);
     if (index < 0 || target < 0 || target >= next.plates.length) return next;
     [next.plates[index], next.plates[target]] = [next.plates[target], next.plates[index]];
-    next.latestLiquidSummary = null;
     next.updatedAt = new Date().toISOString();
     return next;
   }
@@ -294,7 +291,6 @@
     const index = next.plates.findIndex((plate) => plate.id === plateId);
     if (index < 0) return next;
     next.plates.splice(index, 1);
-    next.latestLiquidSummary = null;
     if (next.activePlateId === plateId) next.activePlateId = next.plates[Math.min(index, next.plates.length - 1)].id;
     next.updatedAt = new Date().toISOString();
     return next;

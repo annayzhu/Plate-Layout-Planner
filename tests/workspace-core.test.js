@@ -21,6 +21,14 @@ test("host component identities and separate-sample overage survive aggregation"
   assert.deepEqual(components.map(row => row.preparedVolume), [11, 22, 2]);
 });
 
+test("loading a host project preserves all archived plans and summary warnings", () => {
+  const archivedLiquidPlans = Array.from({ length: 35 }, (_, index) => ({ id: `archive-${index}`, input: { index } }));
+  const restored = Workspace.normalizeWorkspace({ version: 2, plates: [{ archivedLiquidPlans }] });
+  assert.deepEqual(restored.plates[0].archivedLiquidPlans.map(p => p.input), archivedLiquidPlans.map(p => p.input));
+  const group = Workspace.mergeLiquidContributions([{ groupKey: 'mix', groupLabel: 'Mix', plateId: 'p1', component: 'Buffer', baseVolume: 2, unit: 'µL', warnings: ['Verify source concentration'] }]).groups[0];
+  assert.deepEqual(group.sources[0].warnings, ['Verify source concentration']);
+});
+
 test("migrates every populated legacy plate format into an independent physical plate", () => {
   const legacy = {
     version: 1,

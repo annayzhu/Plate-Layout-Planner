@@ -3322,7 +3322,7 @@
         wells,
         plans,
         component.containerCount,
-        [component.warning ? bilingual("存在移液量低于 1 µL", "A transfer is below 1 µL") : "", component.containerCount > 1 ? bilingual(`分装 ${component.containerCount} 个容器`, `Split across ${component.containerCount} containers`) : ""].filter(Boolean).join("；"),
+        [component.warning ? bilingual("存在移液量低于 1 µL", "A transfer is below 1 µL") : "", component.containerCount > 1 ? bilingual(`分装 ${component.containerCount} 个容器`, `Split across ${component.containerCount} containers`) : "", ...new Set(sources.flatMap(source => source.warnings || []))].filter(Boolean).join("；"),
       ]);
     }
     return rows;
@@ -3431,6 +3431,7 @@
             [], [bilingual("操作步骤", "Instructions")], ...(plan.protocolSnapshot?.steps || []).map(step => [step]));
           const operations = plan.resultSnapshot?.operations || [];
           executionRows.push([], [bilingual("组分", "Component"), bilingual("取液来源", "Source"), bilingual("加入位置", "Destination"), bilingual("体积", "Volume"), bilingual("单位", "Unit"), bilingual("次数", "Repetitions")], ...operations.map(op => [op.component, op.source, op.destination, op.quantity?.value, op.quantity?.unit, op.repetitions]));
+          executionRows.push([], [bilingual("警告与限制", "Warnings and limitations")], ...(plan.resultSnapshot?.warnings || []).map(warning => [warning]));
           continue;
         }
         if (plan.resultSnapshot?.structuredPreparation) {

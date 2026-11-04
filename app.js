@@ -1553,13 +1553,14 @@
     return (Number(prepared) || 0) * factor;
   }
 
-  // Plans built from table cells are read again from those cells, so a plan saved before thousands
-  // were read correctly gets the right volumes without being recalculated.
+  // These plans take volumes from their saved table: contributions stored by older versions dropped the thousands.
   function planContributions(plan, plate) {
+    const stored = plan.contributions || [];
     const fromCells = ["basic", "serial", "drug"].includes(plan.module) && !plan.resultSnapshot?.structuredPreparation && plan.resultSnapshot?.rows?.length;
-    if (!fromCells) return plan.contributions || [];
-    const reread = liquidResultContributions({ module: plan.module, input: plan.input, rows: plan.resultSnapshot.rows, recipeName: plan.recipeName }, plate);
-    return reread.length ? reread : plan.contributions || [];
+    if (!fromCells) return stored;
+    const reread = liquidResultContributions({ module: plan.module, input: plan.input, rows: plan.resultSnapshot.rows }, plate);
+    if (reread.length !== stored.length) return reread.length ? reread : stored;
+    return stored.map((item, index) => ({ ...item, baseVolume: reread[index].baseVolume, unit: reread[index].unit }));
   }
 
   function planTotalUL(plan) {

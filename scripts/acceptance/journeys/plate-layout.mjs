@@ -1,8 +1,9 @@
+import { clickMenuItem, closeLiquidDrawer, openLiquidModule, openLiquidPlanView } from "../ui-paths.mjs";
 import { resolve } from "node:path";
 
 export async function plateLayoutJourney({ page, outputDirectory, persistWorkspace, readWorkspace }) {
   if (await page.locator(".well").count() !== 24) throw new Error("Initial 24-well plate did not render.");
-  if (await page.locator("#plateCanvas > .plate-view-head .plate-interaction-help").count() !== 1) throw new Error("Selection guidance is not inside the plate canvas.");
+  if (await page.locator('[data-i18n="selectionHelp"]').isVisible()) throw new Error("Selection guidance should stay behind the help button.");
 
   await page.locator("#projectName").fill("Isolated plate journey");
   await page.locator("#projectName").press("Enter");
@@ -57,10 +58,10 @@ export async function plateLayoutJourney({ page, outputDirectory, persistWorkspa
   await persistWorkspace(clearFixture);
   await page.locator('[data-well="A1"]').click();
 
-  await page.locator("#clearPlateLayoutButton").click();
+  await clickMenuItem(page, "#clearPlateLayoutButton");
   if (!(await page.locator("#clearPlateLayoutButton").evaluate((button) => button.classList.contains("confirming")))) throw new Error("First clear click did not enter an in-page confirmation state.");
   if (!(await page.locator('[data-well="A1"]').innerText()).includes("Sample-A")) throw new Error("First clear click changed data before confirmation.");
-  await page.locator("#clearPlateLayoutButton").click();
+  await clickMenuItem(page, "#clearPlateLayoutButton");
   if ((await page.locator('[data-well="A1"]').innerText()).includes("Sample-A")) throw new Error("Clear current plate did not remove assigned well values.");
   if ((await page.locator("#projectName").inputValue()) !== "Treatment Plate") throw new Error("Clear current plate changed the plate name.");
   if (await page.locator(".dimension-row").count() < 6) throw new Error("Clear current plate removed user parameter dimensions.");
@@ -96,8 +97,8 @@ export async function plateLayoutJourney({ page, outputDirectory, persistWorkspa
     };
   })();
   if (restoredState.hiddenValue !== "Stored-six-well-value" || restoredState.calculated !== 8 || restoredState.calculationOutputs.length !== 1 || restoredState.liquidPlan?.stale) throw new Error(`Undo did not restore the complete physical-plate state: ${JSON.stringify(restoredState)}`);
-  await page.locator("#clearPlateLayoutButton").click();
-  await page.locator("#clearPlateLayoutButton").click();
+  await clickMenuItem(page, "#clearPlateLayoutButton");
+  await clickMenuItem(page, "#clearPlateLayoutButton");
   await page.keyboard.press(process.platform === "darwin" ? "Meta+z" : "Control+z");
   if (!(await page.locator('[data-well="A1"]').innerText()).includes("Sample-A")) throw new Error("Keyboard undo did not restore the cleared plate layout.");
 

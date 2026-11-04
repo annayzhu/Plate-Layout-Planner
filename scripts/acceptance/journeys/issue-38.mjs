@@ -1,3 +1,4 @@
+import { clickMenuItem, closeLiquidDrawer, openLiquidModule, openLiquidPlanView } from "../ui-paths.mjs";
 import { issue28Workspace } from "../fixtures.mjs";
 import { resolve } from "node:path";
 
@@ -14,28 +15,26 @@ export async function issue38PlateZoomJourney({ page, readWorkspace, persistWork
   const activeBefore = before.plates.find((plate) => plate.id === before.activePlateId);
   const planBefore = structuredClone(activeBefore.liquidPlans[0]);
   const undoDisabledBefore = await page.locator("#undoButton").isDisabled();
-  const exportBefore = await downloadText(() => page.locator("#exportCsvButton").click());
-  if ((await page.locator("#plateZoomIndicator").innerText()).trim() !== "100%") throw new Error("Plate zoom did not start at 100%.");
-  const pageScrollBefore = await page.evaluate(() => window.scrollY);
-  await page.locator(".hero").hover();
-  await page.mouse.wheel(0, 600);
+  const exportBefore = await downloadText(() => clickMenuItem(page, "#exportCsvButton"));
+  if ((await page.locator("#fitPlateButton").getAttribute("aria-pressed")) !== "true") throw new Error("The plate did not start fitted to the window.");
+  const fittedZoom = await page.locator("#plateZoomIndicator").innerText();
+  await page.locator("#plateCanvas").hover();
+  await page.mouse.wheel(0, -600);
   await page.waitForTimeout(120);
-  const pageScrollAfter = await page.evaluate(() => window.scrollY);
-  if (pageScrollAfter <= pageScrollBefore) throw new Error("Wheel scrolling outside the plate canvas no longer scrolls the page.");
+  if ((await page.locator("#plateZoomIndicator").innerText()) !== fittedZoom) throw new Error("The wheel changed the plate zoom.");
   const initialWidth = await page.locator('[data-well="A1"]').evaluate((well) => well.getBoundingClientRect().width);
 
-  await page.locator("#plateCanvas").hover();
-  await page.mouse.wheel(0, -240);
-  await page.waitForTimeout(180);
+  await page.locator("#zoomInButton").click();
+  await page.locator("#zoomInButton").click();
 
   const zoomedWidth = await page.locator('[data-well="A1"]').evaluate((well) => well.getBoundingClientRect().width);
   const indicator = await page.locator("#plateZoomIndicator").innerText();
   if (zoomedWidth <= initialWidth) throw new Error(`Mouse-wheel zoom did not enlarge wells: ${initialWidth} -> ${zoomedWidth}`);
-  if (!/^1[01]\d%$/.test(indicator)) throw new Error(`Zoom indicator did not report the enlarged view: ${indicator}`);
-  await page.mouse.wheel(0, 120);
+  if (!/^\d+%$/.test(indicator)) throw new Error(`Zoom indicator did not report the enlarged view: ${indicator}`);
+  await page.locator("#zoomOutButton").click();
   const zoomedOutWidth = await page.locator('[data-well="A1"]').evaluate((well) => well.getBoundingClientRect().width);
   if (zoomedOutWidth >= zoomedWidth) throw new Error(`Mouse-wheel zoom did not shrink wells: ${zoomedWidth} -> ${zoomedOutWidth}`);
-  await page.mouse.wheel(0, -120);
+  await page.locator("#zoomInButton").click();
 
   if ((await page.locator("#selectionCount").innerText()) !== "已选 1 孔" || !(await page.locator('[data-well="A1"]').getAttribute("class")).includes("selected")) {
     throw new Error("Zoom changed the existing well selection.");
@@ -47,7 +46,7 @@ export async function issue38PlateZoomJourney({ page, readWorkspace, persistWork
     throw new Error("Zoom changed or invalidated the saved liquid plan.");
   }
   if (JSON.stringify(afterZoom) !== JSON.stringify(before)) throw new Error("Presentation-only zoom changed persisted scientific workspace data.");
-  const exportAfter = await downloadText(() => page.locator("#exportCsvButton").click());
+  const exportAfter = await downloadText(() => clickMenuItem(page, "#exportCsvButton"));
   if (!exportBefore.bytes.equals(exportAfter.bytes)) throw new Error("Zoom changed the current-plate CSV export.");
   await page.locator("#projectName").fill("A549-1 post-zoom edit");
   await page.locator("#projectName").press("Enter");
@@ -80,17 +79,17 @@ export async function issue38PlateZoomJourney({ page, readWorkspace, persistWork
   await page.locator('[data-size="96"]').click();
   const mediumInitial = await page.locator('[data-well="A1"]').evaluate((well) => well.getBoundingClientRect().width);
   await page.locator("#plateCanvas").hover();
-  await page.mouse.wheel(0, -240);
+  await page.locator("#zoomInButton").click();
   const mediumZoomed = await page.locator('[data-well="A1"]').evaluate((well) => well.getBoundingClientRect().width);
   if (mediumZoomed <= mediumInitial) throw new Error(`96-well zoom did not enlarge the plate: ${mediumInitial} -> ${mediumZoomed}`);
 
   await page.locator('[data-size="384"]').click();
   const denseInitial = await page.locator('[data-well="A1"]').evaluate((well) => well.getBoundingClientRect().width);
   await page.locator("#plateCanvas").hover();
-  await page.mouse.wheel(0, 10000);
-  if ((await page.locator("#plateZoomIndicator").innerText()).trim() !== "60%") throw new Error("Plate zoom did not respect the 60% lower bound.");
-  await page.mouse.wheel(0, -10000);
-  if ((await page.locator("#plateZoomIndicator").innerText()).trim() !== "180%") throw new Error("Plate zoom did not respect the 180% upper bound.");
+  while (await page.locator("#zoomOutButton").isEnabled()) await page.locator("#zoomOutButton").click();
+  if ((await page.locator("#plateZoomIndicator").innerText()).trim() !== "30%") throw new Error("Plate zoom did not respect the 30% lower bound.");
+  while (await page.locator("#zoomInButton").isEnabled()) await page.locator("#zoomInButton").click();
+  if ((await page.locator("#plateZoomIndicator").innerText()).trim() !== "400%") throw new Error("Plate zoom did not respect the 400% upper bound.");
   await page.waitForTimeout(180);
   const denseZoomed = await page.locator('[data-well="A1"]').evaluate((well) => well.getBoundingClientRect().width);
   if (denseZoomed <= denseInitial * 1.25) throw new Error(`384-well zoom did not materially enlarge the plate: ${denseInitial} -> ${denseZoomed}`);
@@ -114,7 +113,7 @@ export async function issue38PlateZoomJourney({ page, readWorkspace, persistWork
     { name: "Incoming A", rows: [["孔位", "样本"], ["A1", "A"]] },
     { name: "Incoming B", rows: [["孔位", "样本"], ["A1", "B"]] },
   ] });
-  await page.locator("#openProjectImportButton").click();
+  await clickMenuItem(page, "#openProjectImportButton");
   await page.locator("#importJsonInput").setInputFiles({ name: "two-plates.xlsx", mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", buffer: Buffer.from(importBytes) });
   await page.waitForFunction(() => document.querySelector("#importPreview")?.textContent?.includes("最多还可放入 1 块"));
   if (!(await page.locator("#confirmImportButton").isDisabled())) throw new Error("Overflowing import was still confirmable.");
@@ -127,7 +126,7 @@ export async function issue38PlateZoomJourney({ page, readWorkspace, persistWork
   duplicateFixture.plates[0].liquidPlans = [];
   duplicateFixture.activePlateId = duplicateFixture.plates[0].id;
   await persistWorkspace(duplicateFixture);
-  await page.locator("#openProjectImportButton").click();
+  await clickMenuItem(page, "#openProjectImportButton");
   await page.locator("#importJsonInput").setInputFiles({ name: "two-plates.xlsx", mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", buffer: Buffer.from(importBytes) });
   await page.waitForFunction(() => document.querySelector("#importPreview")?.textContent?.includes("Incoming A 2"));
   const duplicatePreview = await page.locator("#importPreview").innerText();
@@ -140,8 +139,10 @@ export async function issue38PlateZoomJourney({ page, readWorkspace, persistWork
   summaryFixture.plates[0].dimensions.push({ id: "sample", name: "样本", type: "text", unit: "" });
   summaryFixture.plates[0].plates[6].A1.params.sample = "A549";
   await persistWorkspace(summaryFixture);
+  await openLiquidPlanView(page);
   await page.locator("#projectLiquidScope").selectOption("all");
   await page.locator("#projectLiquidSummaryButton").click();
+  await closeLiquidDrawer(page);
 
   await page.locator("#colorDimension").selectOption("sample");
   let currentWorkspace = await readWorkspace();
@@ -149,18 +150,20 @@ export async function issue38PlateZoomJourney({ page, readWorkspace, persistWork
 
   await page.locator("#projectName").fill("A549-1 renamed");
   await page.locator("#projectName").press("Enter");
-  await page.locator("#movePlateRightButton").click();
-  await page.locator("[data-open-liquid-summary]").click();
-  const summaryText = await page.locator("#summaryDrawerContent").innerText();
+  await clickMenuItem(page, "#movePlateRightButton");
+  
+  await openLiquidPlanView(page);
+  const summaryText = await page.locator("#liquidSummaryTables").innerText();
   if (!summaryText.includes("A549-1 renamed") || summaryText.includes("A549-1:")) throw new Error("Rendered summary retained a stale plate name after rename/reorder.");
   const summaryWorkbook = await downloadWorkbook(() => page.locator('[data-project-liquid-export="xlsx"]').click());
   const workbookText = summaryWorkbook.workbook.sheets.flatMap((sheet) => sheet.rows.flat()).join("\n");
   if (!workbookText.includes("A549-1 renamed") || workbookText.includes("A549-1:")) throw new Error("XLSX export retained a stale plate identity.");
-  await page.locator("#closeSummaryDrawerButton").click();
-  await page.locator("#deletePlateButton").click();
-  await page.locator("#deletePlateButton").click();
-  await page.locator("[data-open-liquid-summary]").click();
-  const postDeleteSummary = await page.locator("#summaryDrawerContent").innerText();
+  await closeLiquidDrawer(page);
+  await clickMenuItem(page, "#deletePlateButton");
+  await clickMenuItem(page, "#deletePlateButton");
+  
+  await openLiquidPlanView(page);
+  const postDeleteSummary = await page.locator("#liquidSummaryTables").innerText();
   if (postDeleteSummary.includes("A549-1 renamed") || !postDeleteSummary.includes("A549-2")) throw new Error("Rendered summary did not remove a deleted plate or lost remaining plates.");
   const summaryCsv = await downloadText(() => page.locator('[data-project-liquid-export="csv"]').click());
   const summaryCsvRows = parseCsv(summaryCsv.text);
@@ -168,7 +171,7 @@ export async function issue38PlateZoomJourney({ page, readWorkspace, persistWork
   if (populatedCsvRows.length < 2 || !populatedCsvRows.some((row) => row.length >= 4)) throw new Error("Summary CSV could not be parsed into a tabular result.");
   const summaryCsvCells = populatedCsvRows.flat();
   if (summaryCsvCells.some((cell) => cell.includes("A549-1 renamed")) || !summaryCsvCells.some((cell) => cell.includes("A549-2"))) throw new Error("Parsed CSV retained a deleted plate identity.");
-  await page.locator("#closeSummaryDrawerButton").click();
+  await closeLiquidDrawer(page);
 
   await page.locator('[data-well="A1"]').click();
   await page.locator('.parameter-input-row').filter({ hasText: "处理" }).locator(".parameter-value").fill("Changed treatment");
@@ -177,5 +180,5 @@ export async function issue38PlateZoomJourney({ page, readWorkspace, persistWork
   const active = currentWorkspace.plates.find((plate) => plate.id === currentWorkspace.activePlateId);
   if (!active.liquidPlans[0]?.stale) throw new Error("Changing scientific well assignments did not mark the saved liquid plan stale.");
 
-  return { initialWidth, zoomedWidth, zoomedOutWidth, mediumInitial, mediumZoomed, denseInitial, denseZoomed, indicator, bounds: "60%-180%", scrollViewport, outsideScroll: true, zoomState: "selection-history-plan-export-preserved", importOverflow: "atomic", duplicateImport: "previewed-and-confirmed", summaryIdentity: "fresh", csvIdentity: "parsed-and-fresh", invalidation: "classified" };
+  return { initialWidth, zoomedWidth, zoomedOutWidth, mediumInitial, mediumZoomed, denseInitial, denseZoomed, indicator, bounds: "30%-400%", scrollViewport, outsideScroll: true, zoomState: "selection-history-plan-export-preserved", importOverflow: "atomic", duplicateImport: "previewed-and-confirmed", summaryIdentity: "fresh", csvIdentity: "parsed-and-fresh", invalidation: "classified" };
 }

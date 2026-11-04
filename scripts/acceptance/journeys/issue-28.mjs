@@ -1,9 +1,11 @@
 import { resolve } from "node:path";
+import { openLiquidPlanView } from "../ui-paths.mjs";
 import { ISSUE_28_TREATMENTS, issue28Workspace } from "../fixtures.mjs";
 
 const EXPECTED_LABELS = [...ISSUE_28_TREATMENTS.map(([name]) => `${name} · A`), "RNAiMAX + siRNA · B"];
 
 async function buildAllPlateSummary(page) {
+  await openLiquidPlanView(page);
   await page.locator("#projectLiquidScope").selectOption("all");
   await page.locator("#projectLiquidSummaryButton").click();
 }
@@ -17,11 +19,10 @@ export async function issue28MergeJourney({ page, persistWorkspace, downloadText
   if (normalized.current !== 1 || normalized.archived !== 1) throw new Error(`Legacy duplicate did not normalize before aggregation: ${JSON.stringify(normalized)}`);
 
   await buildAllPlateSummary(page);
-  await page.locator("[data-open-liquid-summary]").click();
-  const labels = await page.locator("#summaryDrawerContent .operator-preparation-table tbody tr td:nth-child(2)").allInnerTexts();
+  const labels = await page.locator("#liquidSummaryTables .operator-preparation-table tbody tr td:nth-child(2)").allInnerTexts();
   const uniqueLabels = labels.filter((value, index) => index === 0 || value !== labels[index - 1]);
   if (uniqueLabels.join("|") !== EXPECTED_LABELS.join("|")) throw new Error(`Compatible preparations were duplicated or missing: ${uniqueLabels.join(" | ")}`);
-  const targets = await page.locator("#summaryDrawerContent .operator-preparation-table tbody tr td:nth-child(10)").allInnerTexts();
+  const targets = await page.locator("#liquidSummaryTables .operator-preparation-table tbody tr td:nth-child(10)").allInnerTexts();
   if (targets.some((target) => ![1, 2, 3, 4].every((index) => target.includes(`A549-${index}`)))) throw new Error(`Merged rows do not target all four plates: ${targets.join(" | ")}`);
 
   const csv = await downloadText(() => page.locator('[data-project-liquid-export="csv"]').click());
@@ -41,8 +42,7 @@ export async function issue28SplitJourney({ page, persistWorkspace, outputDirect
   await buildAllPlateSummary(page);
   const summary = await page.locator("#projectLiquidSummary").innerText();
   if (!summary.includes("每孔组分或体积不同") || summary.includes("transfection:{")) throw new Error(`The split explanation is missing or leaks internals: ${summary}`);
-  await page.locator("[data-open-liquid-summary]").click();
-  const labels = await page.locator("#summaryDrawerContent .operator-preparation-table tbody tr td:nth-child(2)").allInnerTexts();
+  const labels = await page.locator("#liquidSummaryTables .operator-preparation-table tbody tr td:nth-child(2)").allInnerTexts();
   if (labels.filter((label) => label === "NC-FAM · A").length < 2) throw new Error("A real NC-FAM volume difference was incorrectly merged.");
   await page.screenshot({ path: resolve(outputDirectory, "isolated-issue-28-split.png"), fullPage: true });
   return { splitLabelCount: labels.filter((label) => label === "NC-FAM · A").length };

@@ -1,3 +1,4 @@
+import { clickMenuItem, closeLiquidDrawer, openLiquidModule, openLiquidPlanView } from "../ui-paths.mjs";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { createAcceptanceHarness, assertTextOrder } from "../harness.mjs";
@@ -97,7 +98,7 @@ try {
   await page.locator('[data-well="A4"]').click({ modifiers: ["Shift"] });
   if ((await page.locator("#selectionCount").innerText()) !== "已选 4 孔") throw new Error("Could not establish the four-well calculator scope.");
 
-  await page.locator('.liquid-module-launch[data-liquid-module="transfection"]').click();
+  await openLiquidModule(page, "transfection");
   if (await page.locator("#liquidDrawer").isHidden()) throw new Error("Liquid preparation drawer did not open.");
   let transfectionForm = page.locator("#liquidActiveForm");
   if ((await transfectionForm.locator('[name="direction"]').inputValue()) !== "forward") throw new Error("New RNAiMAX calculations do not default to forward transfection.");
@@ -118,7 +119,7 @@ try {
   await page.locator("#closeLiquidDrawerButton").click();
 
   await page.locator("#selectAllButton").click();
-  await page.locator('.liquid-module-launch[data-liquid-module="transfection"]').click();
+  await openLiquidModule(page, "transfection");
   transfectionForm = page.locator("#liquidActiveForm");
   if ((await transfectionForm.locator('[name="wellCount"]').inputValue()) !== "24") throw new Error("Reopening after selecting the full plate did not refresh the well count to 24.");
   const reopenedCargo = await transfectionForm.locator('[name="cargoName"]').inputValue();
@@ -290,7 +291,7 @@ try {
   await page.locator('[data-liquid-action="save-preset"]').click();
   const fixedRecipeId = await page.locator("[data-liquid-library-select]").inputValue();
   await page.locator("#closeLiquidDrawerButton").click();
-  await page.locator('.liquid-module-launch[data-liquid-module="basic"]').click();
+  await openLiquidModule(page, "basic");
   if (await page.locator('#liquidActiveForm [name="calculationType"]').count() !== 1) {
     throw new Error(`Reopening the basic calculator did not render its form. Browser errors: ${errors.join(" | ")}; drawer hidden=${await page.locator("#liquidDrawer").getAttribute("hidden")}; content=${(await page.locator("#liquidDrawerContent").innerText()).slice(0, 500)}`);
   }
@@ -341,7 +342,7 @@ try {
   await page.locator('[data-liquid-action="save-preset"]').click();
   const confirmedWorkingRecipeId = await page.locator("[data-liquid-library-select]").inputValue();
   await page.locator("#closeLiquidDrawerButton").click();
-  await page.locator('.liquid-module-launch[data-liquid-module="basic"]').click();
+  await openLiquidModule(page, "basic");
   if ((await page.locator('[name="workingSolutionConfirmed"]').inputValue()) !== "no") throw new Error("Closing and reopening preserved a stale working-solution confirmation.");
   await page.locator('#liquidActiveForm button[type="submit"]').click();
   if (await page.locator('[data-liquid-action="confirm-basic-working-solution"]').count() !== 1) throw new Error("Reopened working-solution calculation did not require a fresh confirmation.");
@@ -387,7 +388,7 @@ try {
   await page.locator('[data-well="D1"]').click({ modifiers: ["Control"] });
   await page.locator('[data-well="D2"]').click({ modifiers: ["Control"] });
   await page.locator('[data-well="D3"]').click({ modifiers: ["Control"] });
-  await page.locator('.liquid-module-launch[data-liquid-module="serial"]').click();
+  await openLiquidModule(page, "serial");
   await page.locator('#liquidActiveForm [name="mapToPlate"]').selectOption("on");
   await page.locator('#liquidActiveForm [name="replicates"]').fill("1");
   await page.locator('#liquidActiveForm button[type="submit"]').click();
@@ -400,7 +401,7 @@ try {
   if (!d1SerialTitle?.includes("目标浓度")) throw new Error(`Confirmed serial layout was not written to D1: ${d1SerialTitle}`);
 
   if (await page.locator("#clearSelectionButton").isEnabled()) await page.locator("#clearSelectionButton").click();
-  await page.locator('.liquid-module-launch[data-liquid-module="drug"]').click();
+  await openLiquidModule(page, "drug");
   await page.locator('[name="drugLines"]').fill("Drug A,10000,100,0.78,8,2,2");
   await page.locator('#liquidActiveForm button[type="submit"]').click();
   if (await page.locator(".liquid-preview-well").count() !== 16 || await page.locator('[data-liquid-action="apply-layout"]').count() !== 1) {
@@ -592,16 +593,16 @@ try {
   }
 
   const csvDownloadPromise = page.waitForEvent("download");
-  await page.locator("#exportCsvButton").click();
+  await clickMenuItem(page, "#exportCsvButton");
   const csvDownload = await csvDownloadPromise;
   if (!csvDownload.suggestedFilename().endsWith("24well.csv")) throw new Error("CSV export filename was unexpected.");
 
   const svgDownloadPromise = page.waitForEvent("download");
-  await page.locator("#exportSvgButton").click();
+  await clickMenuItem(page, "#exportSvgButton");
   const svgDownload = await svgDownloadPromise;
   if (!svgDownload.suggestedFilename().endsWith("24well.svg")) throw new Error("SVG export filename was unexpected.");
 
-  await page.locator("#openProjectImportButton").click();
+  await clickMenuItem(page, "#openProjectImportButton");
   const projectTemplateDownloadPromise = page.waitForEvent("download");
   await page.locator("#projectTemplateButton").click();
   const projectTemplateDownload = await projectTemplateDownloadPromise;
@@ -648,7 +649,7 @@ try {
   if (Math.max(...toolbarHeights) - Math.min(...toolbarHeights) > 2) {
     throw new Error(`Plate control heights are inconsistent: ${toolbarHeights.join(", ")}`);
   }
-  await page.locator('.liquid-module-launch[data-liquid-module="transfection"]').click();
+  await openLiquidModule(page, "transfection");
   const englishScopeHelp = (await page.locator(".liquid-scope-help").innerText()).toLowerCase();
   if (!englishScopeHelp.includes("close") || !englishScopeHelp.includes("reselect")) {
     throw new Error(`English well-count guidance is incomplete: ${englishScopeHelp}`);
@@ -667,7 +668,7 @@ try {
   }));
   if (mobileTypography.body < 15 || mobileTypography.helper < 11) throw new Error(`Mobile typography regressed: ${JSON.stringify(mobileTypography)}`);
   await page.screenshot({ path: resolve(outputDirectory, "05-mobile-24-well.png"), fullPage: true });
-  await page.locator('.liquid-module-launch[data-liquid-module="basic"]').click();
+  await openLiquidModule(page, "basic");
   await page.locator('#liquidActiveForm [name="calculationType"]').selectOption("fixed");
   const mobileDrawerWidths = await page.locator("#liquidDrawer").evaluate((drawer) => ({ client: drawer.clientWidth, scroll: drawer.scrollWidth }));
   if (mobileDrawerWidths.scroll > mobileDrawerWidths.client + 1) {
@@ -708,7 +709,7 @@ try {
     "C4,S012,Control,0,24,",
   ].join("\r\n");
   if ((await page.locator("#exportXlsxButton").innerText()).trim() !== "导出项目 XLSX") throw new Error("Project XLSX export is not explicitly scoped.");
-  await page.locator("#openProjectImportButton").click();
+  await clickMenuItem(page, "#openProjectImportButton");
   if (!(await page.locator("#projectFileDialogHelp").innerText()).includes("XLSX")) throw new Error("Spreadsheet import panel does not explain multi-plate XLSX.");
   await page.locator("#importJsonInput").setInputFiles({ name: "实验板_12well.csv", mimeType: "text/csv", buffer: Buffer.from(importCsv) });
   await page.waitForFunction(() => document.querySelector("#importPreview")?.textContent?.includes("实验板"));
@@ -733,7 +734,7 @@ try {
     calculationLog: [],
     calculationOutputs: [],
   };
-  await page.locator("#openBackupRestoreButton").click();
+  await clickMenuItem(page, "#openBackupRestoreButton");
   await page.locator("#restoreJsonInput").setInputFiles({
     name: "legacy-project.json",
     mimeType: "application/json",
@@ -751,7 +752,7 @@ try {
   });
   if (!Array.isArray(legacyLiquidPlans) || legacyLiquidPlans.length !== 0) throw new Error("Legacy JSON import did not normalize missing liquid plans.");
 
-  await page.locator("#duplicatePlateButton").click();
+  await clickMenuItem(page, "#duplicatePlateButton");
   if (await page.locator(".plate-tab").count() !== 2) throw new Error("Full plate duplication did not create a second physical plate.");
   if (!(await page.locator('[data-well="A1"]').getAttribute("title"))?.includes("Legacy-A")) throw new Error("Full plate duplication did not copy well assignments.");
   await page.locator("#projectName").fill("Legacy copy");
@@ -807,7 +808,7 @@ try {
 
   for (const plateIndex of [0, 1]) {
     await page.locator(".plate-tab").nth(plateIndex).click();
-    await page.locator('.liquid-module-launch[data-liquid-module="basic"]').click();
+    await openLiquidModule(page, "basic");
     await page.locator('#liquidActiveForm [name="calculationType"]').selectOption("dilution");
     await page.locator('#liquidActiveForm button[type="submit"]').click();
     await page.locator('[data-liquid-action="save"]').click();
@@ -822,15 +823,15 @@ try {
   if (!liquidSummaryText.includes("已汇总 2 块板")) throw new Error(`Cross-plate liquid summary did not include both saved plans: ${liquidSummaryText}`);
   if (await page.locator("#projectLiquidSummary .liquid-table").count()) throw new Error("The narrow sidebar still renders the full summary table.");
   await page.locator("[data-open-liquid-summary]").click();
-  const fullSummaryText = await page.locator("#summaryDrawerContent").innerText();
+  const fullSummaryText = await page.locator("#liquidSummaryTables").innerText();
   if (!fullSummaryText.includes("Legacy project") || !fullSummaryText.includes("Legacy copy")) throw new Error(`The full summary lost source-plate provenance: ${fullSummaryText}`);
-  const preparationNotes = await page.locator("#summaryDrawerContent .operator-preparation-table tbody tr td:last-child").allInnerTexts();
+  const preparationNotes = await page.locator("#liquidSummaryTables .operator-preparation-table tbody tr td:last-child").allInnerTexts();
   if (!preparationNotes.some((value) => value.includes("分装"))) throw new Error(`Container-capacity splitting was not exposed in the project summary: ${preparationNotes.join(", ")}`);
   const sideWidthAfterSummary = await page.locator(".side-stack").evaluate((element) => element.getBoundingClientRect().width);
   if (Math.abs(sideWidthAfterSummary - sideWidthBeforeSummary) > 1) throw new Error(`The execution summary changed the sidebar width: ${sideWidthBeforeSummary}px -> ${sideWidthAfterSummary}px`);
-  const summaryScroll = await page.locator("#summaryDrawerContent .project-liquid-table-wrap").evaluateAll((elements) => elements.map((element) => ({ client: element.clientWidth, scroll: element.scrollWidth })));
+  const summaryScroll = await page.locator("#liquidSummaryTables .project-liquid-table-wrap").evaluateAll((elements) => elements.map((element) => ({ client: element.clientWidth, scroll: element.scrollWidth })));
   if (!summaryScroll.length || summaryScroll.some((item) => item.scroll <= item.client)) throw new Error(`Full summary does not expose internal horizontal scroll regions: ${JSON.stringify(summaryScroll)}`);
-  if (await page.locator('#summaryDrawerActions [data-project-liquid-export="copy"], #summaryDrawerActions [data-project-liquid-export="csv"], #summaryDrawerActions [data-project-liquid-export="xlsx"]').count() !== 3) {
+  if (await page.locator('#liquidSummaryActions [data-project-liquid-export="copy"], #liquidSummaryActions [data-project-liquid-export="csv"], #liquidSummaryActions [data-project-liquid-export="xlsx"]').count() !== 3) {
     throw new Error("Cross-plate summary does not expose copy, CSV, and XLSX actions together.");
   }
   const summaryCsvDownloadPromise = page.waitForEvent("download");
@@ -864,7 +865,7 @@ try {
     await page.locator('[data-well="A1"]').click();
     await page.locator('[data-well="A2"]').click({ modifiers: ["Control"] });
     await page.locator('[data-well="B1"]').click({ modifiers: ["Control"] });
-    await page.locator('.liquid-module-launch[data-liquid-module="transfection"]').click();
+    await openLiquidModule(page, "transfection");
     await page.locator('#liquidActiveForm [name="groupDimension"]').selectOption({ label: "处理" });
     await page.locator('#liquidActiveForm [name="mergeCommonMix"]').selectOption("on");
     if (plateIndex === 0) await page.locator('#liquidActiveForm [name="groupRoleLines"]').fill("Mock=Mock");
@@ -950,15 +951,15 @@ try {
   await page.locator("#projectLiquidSummaryButton").click();
   if ((await page.locator("#projectLiquidSummary").innerText()).includes("旧方案")) throw new Error("An archived legacy duplicate still entered the current summary.");
   await page.locator("[data-open-liquid-summary]").click();
-  const transfectionSummaryText = await page.locator("#summaryDrawerContent").innerText();
+  const transfectionSummaryText = await page.locator("#liquidSummaryTables").innerText();
   if (transfectionSummaryText.includes("transfection:{") || transfectionSummaryText.includes('"cargoLines"')) throw new Error(`Internal recipe keys leaked into the operator summary: ${transfectionSummaryText.slice(0, 500)}`);
-  const preparationLabels = await page.locator("#summaryDrawerContent .operator-preparation-table tbody tr td:nth-child(2)").allInnerTexts();
+  const preparationLabels = await page.locator("#liquidSummaryTables .operator-preparation-table tbody tr td:nth-child(2)").allInnerTexts();
   const uniquePreparationLabels = preparationLabels.filter((value, index) => index === 0 || value !== preparationLabels[index - 1]);
   const expectedTreatmentOrder = ["Mock · A", "NC-FAM · A", "siFBN2-1 · A", "siFBN2-2 · A", "siFBN2-3 · A", "siFBN2-4 · A", "RNAiMAX + siRNA · B"];
   if (uniquePreparationLabels.slice(0, expectedTreatmentOrder.length).join("|") !== expectedTreatmentOrder.join("|")) {
     throw new Error(`Treatment preparations did not preserve first appearance before the shared mix: ${uniquePreparationLabels.join(" | ")}`);
   }
-  const executionPhases = await page.locator("#summaryDrawerContent .operator-execution-table tbody tr td:nth-child(2)").allInnerTexts();
+  const executionPhases = await page.locator("#liquidSummaryTables .operator-execution-table tbody tr td:nth-child(2)").allInnerTexts();
   const expectedPhasePrefix = [
     ...Array(6).fill("准备独立处理液"),
     "准备公共液",
@@ -969,7 +970,7 @@ try {
   if (executionPhases.slice(0, expectedPhasePrefix.length).join("|") !== expectedPhasePrefix.join("|")) {
     throw new Error(`Transfection execution dependencies were incorrect: ${executionPhases.join(" | ")}`);
   }
-  await page.locator('#summaryDrawerActions [data-project-liquid-export="copy"]').click();
+  await page.locator('#liquidSummaryActions [data-project-liquid-export="copy"]').click();
   const copiedOperatorSummary = await page.evaluate(() => navigator.clipboard.readText());
   if (copiedOperatorSummary.includes("transfection:{")) throw new Error(`Cross-plate clipboard export leaked an internal recipe key: ${copiedOperatorSummary.slice(0, 900)}`);
   assertTextOrder(copiedOperatorSummary, ["Mock · A", "NC-FAM · A", "siFBN2-1 · A", "siFBN2-4 · A", "准备公共液"], "Cross-plate clipboard export");
@@ -998,7 +999,7 @@ try {
   await page.locator("#overviewToggleButton").click();
 
   const xlsxDownloadPromise = page.waitForEvent("download");
-  await page.locator("#exportXlsxButton").click();
+  await clickMenuItem(page, "#exportXlsxButton");
   const xlsxDownload = await xlsxDownloadPromise;
   if (!xlsxDownload.suggestedFilename().endsWith("_multi-plate.xlsx")) throw new Error(`Unexpected XLSX filename: ${xlsxDownload.suggestedFilename()}`);
   const xlsxPath = await xlsxDownload.path();
@@ -1026,15 +1027,15 @@ try {
   const copyPlateSheet = parsedWorkbook.sheets.find((sheet) => sheet.name === "Legacy copy");
   const copyWellOrder = (copyPlateSheet?.rows || []).slice(1).map((row) => row[0]).filter((wellId) => /^[A-Z]+\d+$/.test(String(wellId)));
   if (copyWellOrder.slice(0, 3).join(",") !== "A1,A2,A3") throw new Error(`Z-order XLSX plate sheet was incorrect: ${copyWellOrder.join(",")}`);
-  await page.locator("#openProjectImportButton").click();
+  await clickMenuItem(page, "#openProjectImportButton");
   await page.locator("#importJsonInput").setInputFiles({ name: "roundtrip.xlsx", mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", buffer: xlsxBytes });
   await page.waitForFunction(() => !document.querySelector("#confirmImportButton")?.hidden);
   await page.locator("#confirmImportButton").click();
   if (await page.locator(".plate-tab").count() !== 4) throw new Error("XLSX round-trip did not add exactly the two plate worksheets or failed to skip system sheets.");
   await page.reload({ waitUntil: "networkidle" });
   if (await page.locator(".plate-tab").count() !== 4) throw new Error("IndexedDB/local workspace persistence did not restore all plates after reload.");
-  await page.locator("#deletePlateButton").click();
-  await page.locator("#deletePlateButton").click();
+  await clickMenuItem(page, "#deletePlateButton");
+  await clickMenuItem(page, "#deletePlateButton");
   if (await page.locator(".plate-tab").count() !== 3) throw new Error("Plate deletion did not remove the active plate.");
   await page.locator("#undoButton").click();
   if (await page.locator(".plate-tab").count() !== 4) throw new Error("Project-level undo did not restore the deleted plate.");
@@ -1045,11 +1046,11 @@ try {
   await page.locator("#projectLiquidScope").selectOption("all");
   await page.locator("#projectLiquidSummaryButton").click();
   await page.locator("[data-open-liquid-summary]").click();
-  const issue28Labels = await page.locator("#summaryDrawerContent .operator-preparation-table tbody tr td:nth-child(2)").allInnerTexts();
+  const issue28Labels = await page.locator("#liquidSummaryTables .operator-preparation-table tbody tr td:nth-child(2)").allInnerTexts();
   const issue28UniqueLabels = issue28Labels.filter((value, index) => index === 0 || value !== issue28Labels[index - 1]);
   const issue28ExpectedLabels = ["Mock · A", "NC-FAM · A", "siFBN2-1 · A", "siFBN2-2 · A", "siFBN2-3 · A", "siFBN2-4 · A", "RNAiMAX + siRNA · B"];
   if (issue28UniqueLabels.join("|") !== issue28ExpectedLabels.join("|")) throw new Error(`Issue #28 four-plate fixture produced duplicate or missing preparations: ${issue28UniqueLabels.join(" | ")}`);
-  const issue28Targets = await page.locator("#summaryDrawerContent .operator-preparation-table tbody tr td:nth-child(10)").allInnerTexts();
+  const issue28Targets = await page.locator("#liquidSummaryTables .operator-preparation-table tbody tr td:nth-child(10)").allInnerTexts();
   if (issue28Targets.some((target) => !["A549-1", "A549-2", "A549-3", "A549-4"].every((plate) => target.includes(plate)))) {
     throw new Error(`Issue #28 merged preparations do not all target four plates: ${issue28Targets.join(" | ")}`);
   }
@@ -1074,7 +1075,7 @@ try {
     throw new Error(`A real preparation difference did not produce an operator-facing separation reason: ${issue28SplitSummary}`);
   }
   await page.locator("[data-open-liquid-summary]").click();
-  const issue28SplitLabels = await page.locator("#summaryDrawerContent .operator-preparation-table tbody tr td:nth-child(2)").allInnerTexts();
+  const issue28SplitLabels = await page.locator("#liquidSummaryTables .operator-preparation-table tbody tr td:nth-child(2)").allInnerTexts();
   if (issue28SplitLabels.filter((label) => label === "NC-FAM · A").length < 2) throw new Error("A real NC-FAM volume difference was incorrectly merged.");
   await page.screenshot({ path: resolve(outputDirectory, "09-issue-28-merge-explanation.png"), fullPage: true });
   await page.locator("#closeSummaryDrawerButton").click();
@@ -1088,7 +1089,7 @@ try {
   });
   await page.reload({ waitUntil: "networkidle" });
   await page.locator('.plate-option[data-size="12"]').click();
-  await page.locator('.liquid-module-launch[data-liquid-module="transfection"]').click();
+  await openLiquidModule(page, "transfection");
   const unsupportedPlateForm = page.locator("#liquidActiveForm");
   for (const name of ["finalVolume", "complexVolume", "reagentPerWell"]) {
     if ((await unsupportedPlateForm.locator(`[name="${name}"]`).inputValue()) !== "") throw new Error(`Unsupported 12-well RNAiMAX format silently received a ${name} default.`);
@@ -1101,7 +1102,7 @@ try {
   }
   await page.locator("#closeLiquidDrawerButton").click();
   await page.locator('.plate-option[data-size="6"]').click();
-  await page.locator('.liquid-module-launch[data-liquid-module="transfection"]').click();
+  await openLiquidModule(page, "transfection");
   const sixWellForm = page.locator("#liquidActiveForm");
   await page.locator("[data-liquid-library-select]").selectOption("builtin-rnai");
   await page.locator('[data-liquid-action="load-preset"]').click();

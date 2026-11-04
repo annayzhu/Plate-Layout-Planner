@@ -4120,6 +4120,13 @@
   });
 
   // What a record keeps. Plates are not here: the host reads them from the saved state.
+  function compactSummary(rows, shown) {
+    const wanted = [/组分|Component/i, /基础需求|Base/i, /统一余量|Overage/i, /建议准备|Prepare|Recommended/i];
+    const columns = wanted.map((pattern) => rows[0].findIndex((header) => pattern.test(String(header)))).filter((index) => index >= 0);
+    const pick = (row) => columns.map((index) => String(row[index] ?? ""));
+    return { headers: pick(rows[0]), rows: shown ? rows.slice(1).map(pick) : [] };
+  }
+
   function recordOutput() {
     if (elements.projectName.getAttribute("aria-invalid") === "true") throw new Error(elements.plateNameError.textContent);
     const stale = workspace.plates.filter((plate) => {
@@ -4154,7 +4161,8 @@
       label: bilingual("板布局与配液", "Plate layout and mix"),
       images: [],
       fullTable: { headers: [bilingual("孔位", "Well"), bilingual("板", "Plate"), ...dimensionNames], rows: fullRows },
-      table: { headers: asStrings(summaryRows[0]), rows: plated.length ? summaryRows.slice(1).map(asStrings) : [] },
+      // A record page holds few columns: one plan is already its own table, so the summary only earns its place across plans.
+      table: compactSummary(summaryRows, plated.length > 1),
       tables: plated.map(({ plate, plan }) => {
         const table = liquidPlanTable(plan);
         return { title: `${plate.name} · ${plan.name || plan.recipeName || plan.module}`, headers: asStrings(table.headers), rows: table.rows.map(asStrings) };

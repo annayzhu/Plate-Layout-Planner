@@ -271,3 +271,16 @@ test("single-plate contributions use the same canonical execution order as cross
   assert.ok(plan.steps.findIndex((step) => step.phase === "prepare-common") < plan.steps.findIndex((step) => step.phase === "combine-incubate"));
   assert.ok(plan.steps.findIndex((step) => step.phase === "add-medium") < plan.steps.findIndex((step) => step.phase === "add-complex"));
 });
+
+test("a volume cell keeps its thousands", () => {
+  const read = LiquidPlan.volumeFromCell;
+  assert.deepEqual(read("1,045 µL"), { value: 1045, unit: "µL" });
+  assert.deepEqual(read("1,096.5625 µL"), { value: 1096.5625, unit: "µL" });
+  assert.deepEqual(read("12,345,678 nL"), { value: 12345678, unit: "nL" });
+  assert.deepEqual(read("990 µL"), { value: 990, unit: "µL" });
+  assert.deepEqual(read("3.4375 uL"), { value: 3.4375, unit: "uL" });
+  assert.deepEqual(read("1.5 mL"), { value: 1.5, unit: "mL" });
+  assert.equal(read("—"), null);
+  // Two plain numbers separated by a comma are not one number with a thousands mark.
+  assert.deepEqual(read("10,20 µL"), { value: 20, unit: "µL" });
+});

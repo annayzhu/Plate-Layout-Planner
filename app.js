@@ -1428,14 +1428,6 @@
     return Number(input.prepOverage ?? input.overagePercent ?? input.fixedOveragePercent ?? input.dilutionOveragePercent ?? input.solidOveragePercent ?? 0) || 0;
   }
 
-  function volumeFromCell(value, readsThousands = false) {
-    const text = String(value ?? "");
-    const match = (readsThousands ? text.replace(/(\d),(?=\d{3})/g, "$1") : text).match(/(-?\d+(?:\.\d+)?(?:e[+-]?\d+)?)\s*(nL|uL|µL|mL|L)\b/i);
-    if (!match) return null;
-    const unit = match[2] === "ul" || match[2] === "UL" ? "uL" : match[2];
-    return { value: Number(match[1]), unit };
-  }
-
   function liquidResultContributions(result, plate) {
     if (Array.isArray(result?.contributions)) return result.contributions.map((item) => ({ ...item, scopeWellIds: [...(item.scopeWellIds || [])] }));
     const input = result?.input || {};
@@ -1457,7 +1449,7 @@
     }[result.module] || bilingual("配液方案", "Preparation plan"));
     const contributions = [];
     const add = (component, cell, subgroup = "") => {
-      const volume = volumeFromCell(cell, result.readsThousands);
+      const volume = LiquidPlan.volumeFromCell(cell);
       if (!volume || !Number.isFinite(volume.value) || volume.value < 0) return;
       contributions.push({
         groupKey: subgroup ? `${groupKey}:${subgroup}` : groupKey,
@@ -1561,13 +1553,17 @@
     return (Number(prepared) || 0) * factor;
   }
 
-  // Plans built from table cells are re-read here so the total counts values of 1,000 µL and above in full.
+  // Plans built from table cells are read again from those cells, so a plan saved before thousands
+  // were read correctly gets the right volumes without being recalculated.
+  function planContributions(plan, plate) {
+    const fromCells = ["basic", "serial", "drug"].includes(plan.module) && !plan.resultSnapshot?.structuredPreparation && plan.resultSnapshot?.rows?.length;
+    if (!fromCells) return plan.contributions || [];
+    const reread = liquidResultContributions({ module: plan.module, input: plan.input, rows: plan.resultSnapshot.rows, recipeName: plan.recipeName }, plate);
+    return reread.length ? reread : plan.contributions || [];
+  }
+
   function planTotalUL(plan) {
-    const readFromCells = ["basic", "serial", "drug"].includes(plan.module) && !plan.resultSnapshot?.structuredPreparation;
-    const items = readFromCells
-      ? liquidResultContributions({ module: plan.module, input: plan.input, rows: plan.resultSnapshot?.rows, recipeName: plan.recipeName, readsThousands: true }, project)
-      : plan.contributions || [];
-    return items.reduce((sum, item) => sum + contributionPreparedUL(item, plan), 0);
+    return planContributions(plan, project).reduce((sum, item) => sum + contributionPreparedUL(item, plan), 0);
   }
 
   function renderMixSummary() {
@@ -1634,7 +1630,7 @@
         if (plan.stale) continue;
         const legacyTransfection = plan.module === "transfection" && plan.executionPlanVersion !== LiquidPlan.EXECUTION_PLAN_VERSION;
         if (legacyTransfection || !Array.isArray(plan.contributions) || !plan.contributions.length) skipped.push(`${plate.name} · ${plan.name || plan.module}`);
-        else contributions.push(...plan.contributions.map((item) => ({ ...item, plateId: plate.id, plateName: plate.name, displayOrder: plateOrder * 10000 + (Number(item.displayOrder) || 0) })));
+        else contributions.push(...planContributions(plan, plate).map((item) => ({ ...item, plateId: plate.id, plateName: plate.name, displayOrder: plateOrder * 10000 + (Number(item.displayOrder) || 0) })));
       }
     }
     return { merged: Workspace.mergeLiquidContributions(contributions, { overagePercent, minPipetteVolume: 1, maxContainerVolume }), skipped, contributionCount: contributions.length };

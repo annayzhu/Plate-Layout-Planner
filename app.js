@@ -1492,7 +1492,7 @@
   function liquidPlanTable(plan) {
     const snapshot = plan.resultSnapshot;
     if (Array.isArray(snapshot?.headers) && snapshot.rows?.length) return { headers: snapshot.headers.map((header) => String(header ?? "")), rows: displayRows(snapshot.headers, snapshot.rows) };
-    const contributions = plan.contributions || [];
+    const contributions = planContributions(plan, project);
     const wellsOf = (item) => (item.scopeWellIds || plan.scopeWellIds || []).join(", ");
     // Wells are a column only when components differ; otherwise the plan's scope already says them.
     const showWells = new Set(contributions.map(wellsOf)).size > 1;
@@ -3688,7 +3688,7 @@
       const rows = [headers, ...exportOrderWellIds(plate).map((wellId) => [wellId, ...plate.dimensions.map((dimension) => plate.plates[plate.plateSize][wellId]?.params?.[dimension.id] ?? "")])];
       sheets.push({ name: plate.name, systemKind: "plate", rows, freezeRows: 1, autoFilter: true });
       const preparationRows = [[bilingual("方案名称", "Plan name"), bilingual("配方", "Recipe"), bilingual("状态", "Status"), bilingual("配液类型", "Preparation type"), bilingual("管", "Tube"), bilingual("目的物/分组", "Cargo / group"), bilingual("组分", "Component"), bilingual("每孔", "Per well"), bilingual("基础需求", "Base need"), bilingual("本板方案准备量", "Saved-plan preparation"), bilingual("余量", "Overage"), bilingual("目标孔", "Target wells"), bilingual("操作步骤", "Protocol steps")]];
-      for (const plan of [Workspace.usableLiquidPlan(plate)].filter(Boolean)) for (const contribution of plan.contributions || []) preparationRows.push([
+      for (const plan of [Workspace.usableLiquidPlan(plate)].filter(Boolean)) for (const contribution of planContributions(plan, plate) || []) preparationRows.push([
         plan.name || plan.recipeName || plan.module,
         plan.recipeName || plan.module,
         plan.stale ? bilingual("需重算", "Recalculate") : bilingual("有效", "Current"),

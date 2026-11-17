@@ -802,9 +802,11 @@
 
   function dimensionForPaste(entry) {
     const byName = (dimension) => dimension.name.trim().toLocaleLowerCase() === entry.name.trim().toLocaleLowerCase();
+    // A value only keeps its meaning in a parameter of the same type and, for numbers, the same unit (10 µM is not 10 nM).
+    const fits = (dimension) => dimension.type === entry.type && (entry.type !== "number" || (dimension.unit || "") === entry.unit);
     const sameId = project.dimensions.find((dimension) => dimension.id === entry.id);
-    if (sameId && (byName(sameId) || dimensionDisplayName(sameId) === dimensionDisplayName(entry))) return sameId;
-    const named = project.dimensions.find(byName);
+    if (sameId && fits(sameId) && (byName(sameId) || dimensionDisplayName(sameId) === dimensionDisplayName(entry))) return sameId;
+    const named = project.dimensions.find((dimension) => byName(dimension) && fits(dimension));
     if (named) return named;
     const id = sameId ? `dimension_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}` : entry.id;
     const created = { id, name: entry.name, type: entry.type === "number" ? "number" : "text", unit: entry.unit || "" };

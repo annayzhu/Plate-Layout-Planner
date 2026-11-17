@@ -441,6 +441,8 @@ try {
   const a1 = await page.locator('[data-well="A1"]').boundingBox();
   const b2 = await page.locator('[data-well="B2"]').boundingBox();
   if (!a1 || !b2) throw new Error("Could not resolve well positions for drag selection.");
+  // Dragging from a selected well moves it, so box-select starts from a clear selection.
+  await page.keyboard.press("Escape");
   await page.mouse.move(a1.x + a1.width / 2, a1.y + a1.height / 2);
   await page.mouse.down();
   await page.mouse.move(b2.x + b2.width / 2, b2.y + b2.height / 2, { steps: 8 });

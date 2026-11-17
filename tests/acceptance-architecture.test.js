@@ -11,6 +11,7 @@ test("acceptance registry exposes independently runnable domain journeys", async
     "issue-28-merge",
     "issue-28-split",
     "issue-38-plate-zoom",
+    "move-paste",
   ]);
   for (const name of Object.keys(JOURNEYS).filter((item) => item !== "comprehensive")) assert.equal(typeof JOURNEYS[name], "function");
 });

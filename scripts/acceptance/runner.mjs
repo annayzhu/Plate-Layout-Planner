@@ -6,6 +6,7 @@ import { liquidPlanLifecycleJourney } from "./journeys/liquid-plan-lifecycle.mjs
 import { plateLayoutJourney } from "./journeys/plate-layout.mjs";
 import { issue38PlateZoomJourney } from "./journeys/issue-38.mjs";
 import { preparationJourney } from "./journeys/preparation.mjs";
+import { moveAndPasteJourney } from "./journeys/move-paste.mjs";
 
 export const JOURNEYS = Object.freeze({
   preparation: preparationJourney,
@@ -15,6 +16,7 @@ export const JOURNEYS = Object.freeze({
   "issue-28-merge": issue28MergeJourney,
   "issue-28-split": issue28SplitJourney,
   "issue-38-plate-zoom": issue38PlateZoomJourney,
+  "move-paste": moveAndPasteJourney,
 });
 
 function requestedJourneys() {
